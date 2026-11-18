@@ -215,6 +215,47 @@ then pair again.
     *Nightfall*: voice typing on the headset (tap to start and stop, or
     hold while talking). *Windows*: opens Windows' own dictation (Win+H).
 
+### The buttons as they come
+
+| Right controller | What it does |
+| --- | --- |
+| Trigger | Left click |
+| Grip | Right click |
+| Bumper | Right click |
+| A | Double click |
+| B | Escape |
+| X | Show Keyboard |
+| Y | Voice Typing (hold it and speak) |
+| Menu | Nightfall Menu |
+| Stick, up and down | Scroll |
+| Stick click | Ctrl while you hold it (with the stick: zoom) |
+
+| Left controller | What it does |
+| --- | --- |
+| Trigger | Left click |
+| Grip | Right click |
+| Bumper | Right click |
+| D-pad | Arrow keys |
+| View | Nightfall Menu |
+| Stick click | Ctrl while you hold it |
+
+On the grab bar under the screen, the trigger and grip do more:
+
+- **Trigger on the grab bar, and drag:** moves the screen. It tilts with
+  your wrist as you go.
+- **Add the grip while dragging,** and twist your wrist: rolls the screen
+  (one corner up, the other down).
+- **Push the stick while dragging:** up sends it farther away, down brings
+  it closer.
+- **Trigger on a corner, and drag:** resizes it.
+
+The menu and the keyboard move the same way.
+
+The triggers and grips always click, so you can't lock yourself out of
+pointing. Everything else can be changed in the Buttons tab, and Profiles >
+Default brings this layout back. In Game Controller mode the controllers
+are a gamepad for the PC instead.
+
 ## Make it yours
 
 - **Buttons.** The Buttons tab lets you choose what each controller button
@@ -241,6 +282,31 @@ then pair again.
   tried with Nightfall.
 - **Everything back to how it came:** Advanced Settings > General >
   **Reset Settings** (your paired PCs, buttons and language are kept).
+
+## What frame rate to expect
+
+Every Steam Frame is the same headset, so what the headset can hold should
+be the same for you. What your PC and your Wi-Fi can send is the part that
+differs: these were measured with one PC (an RTX 5090).
+
+| Stream | 3D made by | What it held |
+| --- | --- | --- |
+| Up to 1440p at 90 fps (how it comes) | the headset or Meteor | 90 |
+| 1080p at 144 fps | the headset | 144 most of the time; 125 in the slowest second |
+| 1440p at 144 fps | the headset | 67 to 107: too much, and SteamVR halves the rate |
+| Any, with a color camera add-on showing the room | either | 90 (Nightfall switches to it by itself) |
+
+- Nightfall starts at **90 fps**. It is the setting that held everywhere it
+  was tried, and the easiest on the battery (about 76 minutes with Meteor's
+  depth in our test). **FPS** is on the Stream tab.
+- For **144**, use a 1080p stream, or let Meteor make the 3D on the PC.
+- **With a color camera add-on and Camera FPS Limit off:** at the camera's
+  5K setting, 144 hitches (about 104 fps, with dips to 78, in our test).
+  With the camera at 2.5K it held about 140, with dips to about 120. How to
+  set that is under "Make it yours" above.
+- 72 and 120 fps, and 4K streams, have not been measured with this build.
+- If the picture turns choppy all at once, SteamVR has probably halved the
+  rate because the headset fell behind: lower FPS or Resolution one step.
 
 ## Fixed along the way
 

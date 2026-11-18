@@ -36,6 +36,14 @@ published from.
   get them (VB-CABLE; ViGEmBus 1.17 or newer), since Meteor's Setup
   installs neither. To go into the package's own README with the next
   build.
+- README, also after 9a was built: "The buttons as they come" (what each
+  controller button does on a first start, and how the trigger, grip and
+  stick move, roll, push away and resize a screen), and "What frame rate
+  to expect" (what held in our tests at 90 and 144 fps, and that a color
+  camera at its 5K setting hitches at 144 where 2.5K did not).
+- Confirmed on the headset and the PC: the default buttons, replacing a
+  highlighted part of the address, Meteor 0.9.0-sf19 from its Setup, and
+  the Licences entries.
 - `test_frame_8z.gd` checks the patch and the recipe. Full test run: 86 of
   86.
 
