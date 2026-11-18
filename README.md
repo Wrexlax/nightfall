@@ -8,9 +8,9 @@ by tB0nE, who is not involved in it and can't help with it. It is free
 software under the same license, the GNU General Public License, version 3.
 The original project's own README is kept here as
 [README-original.md](README-original.md).
-It is called a **preview** only because it has been tested on a single
-Steam Frame with a single Windows PC (an RTX 5090) so far. It is used
-daily there and works well. On another setup something may behave
+It is a **preview**: it is built on Nightfall 0.9, and it has been tested
+on a single Steam Frame with a single Windows PC (an RTX 5090) so far. It
+is used daily there and works well. On another setup something may behave
 differently; if it does, please report it.
 
 There are two parts:
