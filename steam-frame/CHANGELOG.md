@@ -27,6 +27,10 @@ published from.
   **Not seen on a headset.**
 - 8z's own title line is taken out again, having done nothing.
 - **Confirmed on the headset: SteamOS shows "Nightfall".**
+- On the fork (github.com/Wrexlax/nightfall, branch `steam-frame-preview`)
+  the port's README is the top-level `README.md`, where a visitor lands;
+  the original's is kept as `README-original.md`. It was
+  `steam-frame/RELEASE-README.md` until then.
 - Release README, after 9a was built: "Two extras on the PC" says what the
   headset's microphone and Game Controller mode need there and where to
   get them (VB-CABLE; ViGEmBus 1.17 or newer), since Meteor's Setup

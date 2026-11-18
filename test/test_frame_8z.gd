@@ -20,7 +20,7 @@ func _init() -> void:
 	var home := "https://github.com/Wrexlax/nightfall"
 	var names := Licences.names(true)
 	assert("\n".join(Licences.lines(names.find("Nightfall for Steam Frame"), true)).contains(home))
-	for path in ["res://steam-frame/RELEASE-README.md", "res://steam-frame/package/README.txt"]:
+	for path in ["res://README.md", "res://steam-frame/package/README.txt"]:
 		var text := FileAccess.get_file_as_string(path)
 		assert(text.contains(home), "%s says where the port lives" % path)
 		assert(text.contains("/issues") or text.contains("Issues page"), "%s says where to report a problem" % path)
