@@ -444,7 +444,7 @@ On the PC: Windows Settings > Apps > Nightfall Meteor > Uninstall.
 This port is other people's work put together and adapted. With thanks to:
 
 - **[Nightfall](https://github.com/tB0nE/nightfall) and Nightfall Meteor**
-  by tB0nE: everything this port stands on. The port began with his
+  by tB0nE: everything this port stands on. The port began with tB0nE's
   [remark](https://reddit.com/r/virtualreality/s/5bL9sd3tce) that someone
   with a Steam Frame could take the source and add support for it.
 - **[Moonlight XR for Frame](https://github.com/simplysanatori/moonlight-xr-steam-frame)**:
@@ -476,7 +476,7 @@ the way, for its author, and `steam-frame/engine/README.md` says how the
 engine build differs from Godot's own.
 
 The Meteor Setup includes the original's own streaming host (tB0nE's build
-of Vibepollo), unchanged from his Meteor 0.9.0. Its source is at
+of Vibepollo), unchanged from the original Meteor 0.9.0. Its source is at
 <https://github.com/tB0nE/Vibepollo>.
 
 The port's code, its tests and its translations were written with an AI

@@ -362,13 +362,13 @@ No new build. From a test session, the headset's log and Meteor's.
   and Wi-Fi only as before; Media tab and Mute light; Foveation follows the
   eyes (what is looked at is never pixelated; High obvious at the edge of
   vision, Low hard to see); Foveation's new tooltip; no eye points in the log.
-- **Stream Link through the original Meteor works** (8o's change). His Meteor's log: "video multipath: ... is another path of ...";
+- **Stream Link through the original Meteor works** (8o's change). The original Meteor's log: "video multipath: ... is another path of ...";
   the headset's: both links carrying the stream, the adapter's copy first
   for about 90%, packets lost on Wi-Fi delivered by the adapter. Microphone
   and Meteor's depth worked; the Media tab was gone, as expected.
-- **Where his differs, seen once:** the Wi-Fi went silent for about 50 s
+- **Where the original differs, seen once:** the Wi-Fi went silent for about 50 s
   (a roam between access points) while the adapter's link was still up at
-  full speed. The stream ended after 3 s, because his multipath carries
+  full speed. The stream ended after 3 s, because its multipath carries
   picture and sound only and the controls stay on Wi-Fi; Nightfall's fifth
   retry got through when Wi-Fi returned. This port's Meteor sends the
   controls over both links for this case (sf8); the same test was not
@@ -418,22 +418,22 @@ So that this port also works with the original Meteor. Headset only.
   author added the same idea there under the name multipath: Meteor copies
   the picture and sound to every address that sends a stream's own ping.
   This port's pings carry two extra bytes (the Stream Link choice), which
-  his Meteor does not take for pings, and his Meteor has no list of fixes
+  the original Meteor does not take for pings, and it has no list of fixes
   to say what it can do, so the headset never asked. Now a Meteor of
   version 0.9.1 or later without this port's "second-link" is sent plain
   pings over the adapter's link (`StreamManager.offers_second_link`,
   `speaks_plain_second_link`; the stream library could do this already).
   With it: **Multi-Link** = picture and sound over both links; **Wi-Fi
-  only** = one link; **Adapter first** works as Multi-Link (his Meteor
+  only** = one link; **Adapter first** works as Multi-Link (that Meteor
   cannot send over the adapter alone; the log says so). Not with it: the
   choice in Meteor's tray menu, controls, microphone and depth over both
   links, the media keys, Mute lit: those need this port's Meteor.
 - **Sound goes through the original Meteor from 0.9.1** and no longer
-  around it. His 0.9.1 has the fix for sound stopping after the PC was
-  silent (his commit b7dc8c4), so the detour this port takes with his
-  0.9.0 isn't needed, and the sound gets both links too.
-- Read in his source at `v0.9.1-preview.2` (`meteor/src/proxy.rs`), **not
-  run**: nothing here has streamed through his Meteor. One session with
+  around it. The original 0.9.1 has the fix for sound stopping after the PC was
+  silent (commit b7dc8c4 there), so the detour this port takes with the
+  original 0.9.0 isn't needed, and the sound gets both links too.
+- Read in the original's source at `v0.9.1-preview.2` (`meteor/src/proxy.rs`), **not
+  run**: nothing here has streamed through that Meteor. One session with
   `Nightfall-Meteor-0.9.1-preview.2-Setup-x64.exe` installed is the test.
 - With this port's own Meteor nothing changes.
 - `test/test_frame_8o.gd`; suite 82 of 82.
