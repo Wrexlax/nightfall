@@ -1,7 +1,7 @@
 [Desktop Entry]
 Type=Application
 Name=Nightfall Meteor
-Comment=Host depth and microphone for Nightfall on Meta Quest
+Comment=Host depth and microphone for Nightfall on your headset
 Exec=nightfall-meteor
 Icon=nightfall-meteor
 Categories=Network;Game;

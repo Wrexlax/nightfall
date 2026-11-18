@@ -22,6 +22,9 @@
 #include "audio/opus_decoder.h"
 #include "audio/audio_renderer.h"
 #include "input/input_bridge.h"
+#ifdef NIGHTFALL_HAS_WHISPER
+#include "voice/voice_typer.h"
+#endif
 
 #ifdef __ANDROID__
 #include "video/pyrowave_decoder.h"
@@ -65,6 +68,9 @@ void initialize_nightfall_types(ModuleInitializationLevel p_level)
     GDREGISTER_CLASS(OpusDecoderWrapper);
     GDREGISTER_CLASS(AudioRenderer);
     GDREGISTER_CLASS(InputBridge);
+#ifdef NIGHTFALL_HAS_WHISPER
+    GDREGISTER_CLASS(VoiceTyper);
+#endif
 }
 
 void uninitialize_nightfall_types(ModuleInitializationLevel p_level)

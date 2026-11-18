@@ -1,0 +1,260 @@
+{
+	"whisper": "es",
+	"on": [
+		"sí",
+		"encendido",
+		"activado",
+		"encender",
+		"activar"
+	],
+	"off": [
+		"no",
+		"apagado",
+		"desactivado",
+		"apagar",
+		"desactivar"
+	],
+	"next": [
+		"siguiente",
+		"cambiar"
+	],
+	"enable": [
+		"activa",
+		"enciende"
+	],
+	"disable": [
+		"desactiva",
+		"apaga"
+	],
+	"minus": [
+		"menos"
+	],
+	"plus": [
+		"más"
+	],
+	"to": [
+		"a",
+		"al",
+		"en"
+	],
+	"drop": [
+		"el",
+		"la",
+		"los",
+		"las",
+		"un",
+		"una",
+		"por favor",
+		"de",
+		"del",
+		"pon",
+		"poner",
+		"ajusta",
+		"ajustar"
+	],
+	"commands": {
+		"recenter": [
+			"recentrar",
+			"centrar",
+			"recentrar pantalla",
+			"centrar pantalla"
+		],
+		"show menu": [
+			"mostrar menú",
+			"abrir menú",
+			"ver menú"
+		],
+		"hide menu": [
+			"ocultar menú",
+			"cerrar menú"
+		],
+		"menu": [
+			"menú"
+		],
+		"show keyboard": [
+			"mostrar teclado",
+			"abrir teclado"
+		],
+		"hide keyboard": [
+			"ocultar teclado",
+			"cerrar teclado"
+		],
+		"keyboard": [
+			"teclado"
+		],
+		"head lock on": [
+			"bloqueo cabeza sí",
+			"bloquear cabeza",
+			"bloqueo cabeza activado",
+			"bloqueo cabeza encendido"
+		],
+		"head lock off": [
+			"bloqueo cabeza no",
+			"desbloquear cabeza",
+			"bloqueo cabeza desactivado",
+			"bloqueo cabeza apagado"
+		],
+		"volume up": [
+			"subir volumen",
+			"más volumen",
+			"más alto"
+		],
+		"volume down": [
+			"bajar volumen",
+			"menos volumen",
+			"más bajo"
+		],
+		"volume #": [
+			"volumen #"
+		],
+		"mute": [
+			"silenciar",
+			"silencio",
+			"quitar sonido"
+		],
+		"unmute": [
+			"quitar silencio",
+			"activar sonido",
+			"reactivar sonido"
+		],
+		"curve #": [
+			"curvatura #"
+		],
+		"flat screen": [
+			"pantalla plana",
+			"plano",
+			"sin curvatura"
+		],
+		"passthrough fade #": [
+			"atenuar passthrough #",
+			"oscurecer habitación #"
+		],
+		"glow strength #": [
+			"intensidad brillo #"
+		],
+		"glow size #": [
+			"tamaño brillo #"
+		],
+		"separation #": [
+			"separación #"
+		],
+		"convergence #": [
+			"convergencia #"
+		],
+		"select all": [
+			"seleccionar todo"
+		],
+		"copy": [
+			"copiar"
+		],
+		"paste": [
+			"pegar"
+		],
+		"cut": [
+			"cortar"
+		],
+		"undo": [
+			"deshacer"
+		],
+		"redo": [
+			"rehacer"
+		],
+		"save": [
+			"guardar"
+		],
+		"find": [
+			"buscar"
+		],
+		"new tab": [
+			"nueva pestaña"
+		],
+		"close tab": [
+			"cerrar pestaña"
+		],
+		"close window": [
+			"cerrar ventana"
+		],
+		"switch window": [
+			"cambiar ventana",
+			"cambiar de ventana"
+		],
+		"show desktop": [
+			"mostrar escritorio"
+		],
+		"task manager": [
+			"administrador tareas"
+		],
+		"start menu": [
+			"menú inicio",
+			"tecla windows"
+		],
+		"screenshot": [
+			"captura pantalla",
+			"captura"
+		],
+		"escape": [
+			"escape"
+		],
+		"enter": [
+			"intro",
+			"enter",
+			"entrar"
+		],
+		"tab key": [
+			"tabulador",
+			"tecla tab"
+		],
+		"backspace": [
+			"retroceso"
+		],
+		"delete": [
+			"suprimir",
+			"tecla suprimir"
+		],
+		"page up": [
+			"página arriba",
+			"re pág"
+		],
+		"page down": [
+			"página abajo",
+			"av pág"
+		]
+	},
+	"typing": {
+		"clear": [
+			"borrar",
+			"borra"
+		],
+		"submit": [
+			"enviar"
+		],
+		"new line": [
+			"nueva línea",
+			"salto línea"
+		],
+		"new paragraph": [
+			"nuevo párrafo"
+		],
+		"open parenthesis": [
+			"abrir paréntesis",
+			"abre paréntesis"
+		],
+		"close parenthesis": [
+			"cerrar paréntesis",
+			"cierra paréntesis"
+		]
+	},
+	"help": [
+		"Di el nombre de un botón y lo que debe ser: así funcionan todos los botones del menú",
+		"El siguiente valor del botón",
+		"Un botón sin nada que elegir: solo su nombre"
+	],
+	"list": {
+		"commands": "Comandos",
+		"menu": "Cualquier botón del menú",
+		"typing": "Al dictar",
+		"note": "Mantén pulsado tu botón de voz y di un comando solo.",
+		"note_prefix": "Empieza cada comando con «Nightfall».",
+		"note_off": "Los comandos de voz están desactivados: todo lo que dices se escribe."
+	}
+}

@@ -1,0 +1,113 @@
+Steam Frame: let Nightfall ask the graphics driver to treat the depth model's
+work as low priority.
+
+Why: on the headset the depth model and Nightfall's own drawing share one
+graphics chip. Measured in build 7j (2026-11-15): at a 90 Hz display Nightfall
+drew about 80 frames a second while the model ran, and at 144 Hz it was held at
+half rate; the model's work was being served in turn with the drawing.
+
+What Vulkan offers for this: a "global priority" for a queue, which sets how
+its work ranks against other programs' on the same chip (core in Vulkan 1.4;
+the extensions VK_KHR_global_priority and VK_EXT_global_priority before that).
+Asking for LOW needs no special rights. ncnn makes its queues without it and
+has no setting for it, hence this patch.
+
+What it adds, in src/gpu.cpp only (gpu.h is left alone so that nothing else
+is rebuilt): two functions, declared by Nightfall where it uses them, and the
+priority request when the Vulkan device is made. If the driver does not offer
+the feature, or refuses, the device is made exactly as before.
+
+Applied by build-ncnn.sh to the pinned ncnn revision.
+
+diff --git a/src/gpu.cpp b/src/gpu.cpp
+index 3aab84e3..2dbb08dc 100644
+--- a/src/gpu.cpp
++++ b/src/gpu.cpp
+@@ -100,6 +100,25 @@ static int g_default_gpu_index = -1;
+ static GpuInfo* g_gpu_infos[NCNN_MAX_GPU_COUNT] = {0};
+ 
+ // default vulkan device
++// Steam Frame (Nightfall): asking the driver to treat this library's work as
++// low priority, so that an app drawing on the same graphics chip is served
++// first. See steam-frame/ncnn-low-priority.patch in Nightfall's tree.
++static int g_frame_low_priority_wanted = 0;
++static int g_frame_low_priority_state = 0;
++
++// Call before the first get_gpu_device(). Not in gpu.h: declare it where used.
++NCNN_EXPORT void frame_ask_low_queue_priority(int wanted)
++{
++    g_frame_low_priority_wanted = wanted;
++}
++
++// 0 not asked, 1 the driver took it, -1 the driver does not offer it,
++// -2 the driver offers it but refused (the device was then made without it).
++NCNN_EXPORT int frame_low_queue_priority_state()
++{
++    return g_frame_low_priority_state;
++}
++
+ static Mutex g_default_vkdev_lock;
+ static VulkanDevice* g_default_vkdev[NCNN_MAX_GPU_COUNT] = {0};
+ 
+@@ -4189,6 +4208,43 @@ VulkanDevice::VulkanDevice(int device_index)
+     deviceComputeQueueCreateInfo.queueCount = info.compute_queue_count();
+     deviceComputeQueueCreateInfo.pQueuePriorities = compute_queue_priorities.data();
+ 
++    // Steam Frame: VkDeviceQueueGlobalPriorityCreateInfo (core in Vulkan 1.4,
++    // VK_KHR_global_priority / VK_EXT_global_priority before that) with
++    // VK_QUEUE_GLOBAL_PRIORITY_LOW. simplevk does not carry these, so they are
++    // written out; the numbers are the Vulkan registry's.
++    struct FrameQueueGlobalPriority
++    {
++        VkStructureType sType;
++        const void* pNext;
++        int globalPriority;
++    };
++    FrameQueueGlobalPriority frameLowPriority;
++    frameLowPriority.sType = (VkStructureType)1000174000;
++    frameLowPriority.pNext = 0;
++    frameLowPriority.globalPriority = 128;
++    const char* framePriorityExtension = 0;
++    if (g_frame_low_priority_wanted)
++    {
++        uint32_t count = 0;
++        vkEnumerateDeviceExtensionProperties(info.physicalDevice(), 0, &count, 0);
++        std::vector<VkExtensionProperties> offered(count);
++        if (count)
++            vkEnumerateDeviceExtensionProperties(info.physicalDevice(), 0, &count, offered.data());
++        for (uint32_t j = 0; j < count; j++)
++        {
++            if (strcmp(offered[j].extensionName, "VK_KHR_global_priority") == 0)
++                framePriorityExtension = "VK_KHR_global_priority";
++            else if (!framePriorityExtension && strcmp(offered[j].extensionName, "VK_EXT_global_priority") == 0)
++                framePriorityExtension = "VK_EXT_global_priority";
++        }
++        if (framePriorityExtension)
++        {
++            enabledExtensions.push_back(framePriorityExtension);
++            deviceComputeQueueCreateInfo.pNext = &frameLowPriority;
++        }
++        g_frame_low_priority_state = framePriorityExtension ? 1 : -1;
++    }
++
+     VkDeviceQueueCreateInfo deviceTransferQueueCreateInfo;
+     deviceTransferQueueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+     deviceTransferQueueCreateInfo.pNext = 0;
+@@ -4221,6 +4277,17 @@ VulkanDevice::VulkanDevice(int device_index)
+     deviceCreateInfo.pEnabledFeatures = &info.physicalDevicefeatures();
+ 
+     VkResult ret = vkCreateDevice(info.physicalDevice(), &deviceCreateInfo, 0, &d->device);
++    if (ret != VK_SUCCESS && framePriorityExtension)
++    {
++        // Steam Frame: refused with the low priority; make it as before.
++        NCNN_LOGE("vkCreateDevice with low queue priority failed %d, trying without", ret);
++        g_frame_low_priority_state = -2;
++        enabledExtensions.pop_back();
++        deviceQueueCreateInfos[0].pNext = 0;
++        deviceCreateInfo.enabledExtensionCount = enabledExtensions.size();
++        deviceCreateInfo.ppEnabledExtensionNames = enabledExtensions.data();
++        ret = vkCreateDevice(info.physicalDevice(), &deviceCreateInfo, 0, &d->device);
++    }
+     if (ret != VK_SUCCESS)
+     {
+         NCNN_LOGE("vkCreateDevice failed %d", ret);

@@ -135,11 +135,36 @@ var comp_corner_layer: Node3D = null
 var comp_corner_viewport: SubViewport = null
 var comp_corner_rects: Array = []
 var comp_layer: Node3D = null
-var comp_base_size: Vector2i = Vector2i(1920, 1080)
+# Steam Frame: the flat screen's layer pictures are 4K whatever the stream's
+# size (the picture is stretched to the layer, which is sized from mesh_size,
+# so the stream's aspect ratio is preserved). The size was pinned in the
+# Android build, where resizing a SubViewport that backs a layer crashed the
+# GL thread. With AI 3D that is two 4K pictures redrawn every frame: 6.3 ms
+# at 144 Hz for a 1080p stream (6m log), against 1.2 ms without.
+# `sf_match_stream` (Picture > Flat Screen Detail: Stream Size) lets the
+# pictures follow the stream's size as they do on Quest: 1.0 ms and a steady
+# 144 in the 6n log, with no difference that could be seen. It is the default
+# from 6o; Full keeps the 4K pictures for comparison. The value here is what
+# holds until the saved settings are read, which is after the first layers
+# are made, so it matches the setting's default.
+const SF_COMP_BASE_SIZE := Vector2i(3840, 2160)
+static var sf_match_stream := true
+## The size last asked for, kept so the pinned size can be given up or taken
+## back while running (SettingsController.apply_flat_screen_detail()).
+var comp_base_requested: Vector2i = Vector2i(1920, 1080)
+var comp_base_size: Vector2i = Vector2i(1920, 1080):
+	set(v):
+		comp_base_requested = v
+		if main != null and main.get("device_is_steam_frame") == true and not sf_match_stream:
+			comp_base_size = SF_COMP_BASE_SIZE
+		else:
+			comp_base_size = v
 var _original_mat: Material = null
 
 var _comp_cyl_center := Vector3.ZERO
 var _comp_cyl_radius := 0.0
+# Radius the curved mesh (and its collider) was last built with.
+var _mesh_radius := 0.0
 var _comp_cyl_central_angle := 0.0
 
 @onready var grab_bar: MeshInstance3D = %ScreenGrabBar
@@ -171,11 +196,18 @@ func setup(p_main: Node3D, p_monitor_id: StringName = &"m0") -> void:
 	main = p_main
 	monitor_id = p_monitor_id
 
+# Steam Frame: the Curve slider's radius for a given viewing distance.
+static func frame_curve_radius(view_dist: float, amount: int) -> float:
+	var a := clampf(float(amount) / 100.0, 0.01, 1.0)
+	return view_dist * (1.0 + 3.0 * (1.0 - a))
+
 func get_cylinder_radius() -> float:
-	if main.comp and main.comp.in_use:
+	if main.comp and main.comp.in_use and is_inside_tree() and main.xr_camera.is_inside_tree():
 		var cam_to_screen = global_position - main.xr_camera.global_position
 		# Same clamp as the composition cylinder it has to match.
 		var view_dist = maxf(cam_to_screen.length(), 0.5)
+		if main.device_is_steam_frame and curvature != 0:
+			return frame_curve_radius(view_dist, main.settings.frame_curve_amount)
 		if curvature == 1:
 			return view_dist * 3.0
 		elif curvature == 2:
@@ -406,6 +438,7 @@ func apply_curvature():
 	var v_subdivide = 16
 	var radius = get_cylinder_radius()
 	built_radius = radius
+	_mesh_radius = radius
 	var angle = ms.x / radius
 	var verts = PackedVector3Array()
 	var uvs = PackedVector2Array()
@@ -439,7 +472,10 @@ func apply_curvature():
 	arr_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
 	mesh = arr_mesh
 	update_shader_for_mesh()
-	set_collision_curved(verts, indices)
+	if main and main.device_is_steam_frame:
+		_set_collision_curved_padded(radius)
+	else:
+		set_collision_curved(verts, indices)
 
 func update_shader_for_mesh():
 	set_collision_flat()
@@ -452,8 +488,16 @@ func set_collision_flat():
 	if not col_shape:
 		return
 	var box = BoxShape3D.new()
-	box.size = Vector3(mesh_size.x, mesh_size.y, 0.01)
+	# Hit area reaches a little past the picture (more at the top and sides
+	# than at the bottom, where the grab bar sits). Pointing just past an edge
+	# then lands on the edge pixel (hit_point_to_uv clamps), so title bars,
+	# the taskbar and window corners are easy to reach.
+	var side := mesh_size.y * 0.06
+	var top := mesh_size.y * 0.06
+	var bottom := mesh_size.y * 0.02
+	box.size = Vector3(mesh_size.x + side * 2.0, mesh_size.y + top + bottom, 0.01)
 	col_shape.shape = box
+	col_shape.position = Vector3(0.0, (top - bottom) * 0.5, col_shape.position.z)
 
 func set_collision_curved(verts: PackedVector3Array, indices: PackedInt32Array):
 	var col_shape = get_node_or_null("Area3D/CollisionShape3D")
@@ -467,6 +511,36 @@ func set_collision_curved(verts: PackedVector3Array, indices: PackedInt32Array):
 	var concave = ConcavePolygonShape3D.new()
 	concave.set_faces(faces)
 	col_shape.shape = concave
+
+# Steam Frame: the curved hit area reaches a little past the picture, like
+# set_collision_flat() (sides/top 6% of the height, bottom 2%), so window
+# edges and the taskbar are easy to point at.
+func _set_collision_curved_padded(radius: float):
+	var col_shape = get_node_or_null("Area3D/CollisionShape3D")
+	if not col_shape:
+		return
+	var ms: Vector2 = mesh_size
+	var side := ms.y * 0.06
+	var y_top := ms.y * 0.5 + ms.y * 0.06
+	var y_bot := -ms.y * 0.5 - ms.y * 0.02
+	var angle := (ms.x + side * 2.0) / radius
+	var steps := 32
+	var faces = PackedVector3Array()
+	for j in range(steps):
+		var a0 := -angle * 0.5 + angle * float(j) / steps
+		var a1 := -angle * 0.5 + angle * float(j + 1) / steps
+		var p0 := Vector3(sin(a0) * radius, 0.0, radius - cos(a0) * radius)
+		var p1 := Vector3(sin(a1) * radius, 0.0, radius - cos(a1) * radius)
+		var b0 := Vector3(p0.x, y_bot, p0.z)
+		var t0 := Vector3(p0.x, y_top, p0.z)
+		var b1 := Vector3(p1.x, y_bot, p1.z)
+		var t1 := Vector3(p1.x, y_top, p1.z)
+		faces.append_array(PackedVector3Array([b0, t0, b1, t0, t1, b1]))
+	var concave = ConcavePolygonShape3D.new()
+	concave.backface_collision = true
+	concave.set_faces(faces)
+	col_shape.shape = concave
+	col_shape.position = Vector3.ZERO
 
 func resize_to_aspect(w: int, h: int):
 	var aspect = float(w) / float(h)
@@ -484,6 +558,33 @@ func resize_to_aspect(w: int, h: int):
 	update_corner_positions()
 	if bezel_mesh:
 		update_bezel_size()
+
+# The widest a screen may be for how far away it is. With no upper limit a
+# corner drag could make it tens of metres wide; its corners, grab bar and
+# icons then sit far outside the view and nothing could shrink it again
+# (2026-11-14: 42.5 m wide at 6 m, also after restarting).
+const MIN_WIDTH := 0.6
+const MAX_WIDTH_PER_METRE := 3.0
+
+static func max_width_at(distance: float) -> float:
+	return maxf(MAX_WIDTH_PER_METRE * distance, 3.0)
+
+## Sets the width (the height follows from `aspect`) and rebuilds what
+## depends on it: the mesh or its curve, the corners and the bezel.
+func set_width(new_w: float, aspect: float) -> void:
+	new_w = maxf(new_w, MIN_WIDTH)
+	var new_h = new_w / aspect
+	if new_h < 0.4:
+		new_h = 0.4
+		new_w = new_h * aspect
+	mesh_size = Vector2(new_w, new_h)
+	if curvature == 0:
+		mesh.size = mesh_size
+		set_collision_flat()
+	else:
+		apply_curvature()
+	update_corner_positions()
+	update_bezel_size()
 
 var _corner_resize_started: bool = false
 var _corner_start_width: float = 0.0
@@ -521,21 +622,8 @@ func apply_corner_resize(ray_origin: Vector3, ray_dir: Vector3, corner_idx: int,
 		var cur_a = asin(clampf(local_hit.x / radius, -1.0, 1.0))
 		var da = cur_a - start_a
 		new_w = _corner_start_width + da * radius * sign * 2.0
-	new_w = maxf(new_w, 0.6)
-	var new_h = new_w / tile_aspect
-	if new_h < 0.4:
-		new_h = 0.4
-		new_w = new_h * tile_aspect
-
-	mesh_size = Vector2(new_w, new_h)
-	if curvature == 0:
-		mesh.size = mesh_size
-		set_collision_flat()
-	else:
-		apply_curvature()
-
-	update_corner_positions()
-	update_bezel_size()
+	new_w = minf(new_w, max_width_at(global_position.distance_to(ray_origin)))
+	set_width(new_w, tile_aspect)
 
 func end_corner_resize():
 	_corner_resize_started = false
@@ -586,6 +674,13 @@ func hit_point_to_uv(hit_point: Vector3) -> Vector2:
 	var uv_y = clampf((ms.y * 0.5 - local_pos.y) / ms.y, 0.0, 1.0)
 	if curvature == 0:
 		uv_x = clampf((local_pos.x + ms.x * 0.5) / ms.x, 0.0, 1.0)
+	elif main.device_is_steam_frame:
+		# Steam Frame: a curved screen is this node's own curved mesh drawn in
+		# the 3D scene (SteamVR has no cylinder layers), so map the hit back
+		# along the exact arc the mesh was built with.
+		var r := _mesh_radius if _mesh_radius > 0.01 else get_cylinder_radius()
+		var total: float = ms.x / r
+		uv_x = clampf((asin(clampf(local_pos.x / r, -1.0, 1.0)) + total * 0.5) / total, 0.0, 1.0)
 	elif main.comp and main.comp.in_use and _comp_cyl_radius > 0.01 and _comp_cyl_central_angle > 0.001:
 		var cam_pos = main.xr_camera.global_position
 		var ray_dir = (hit_point - cam_pos).normalized()

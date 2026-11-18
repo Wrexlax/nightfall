@@ -28,6 +28,17 @@ FACES = {"ja": 0, "ko": 1, "zh_CN": 2, "zh_TW": 3}
 PICKER_NAMES = "日本語한국어简体中文繁體中文\u25BC"
 
 
+def _strings(value) -> str:
+    """Every string anywhere inside a JSON value, run together."""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        return "".join(_strings(v) for v in value.values())
+    if isinstance(value, list):
+        return "".join(_strings(v) for v in value)
+    return ""
+
+
 def main() -> int:
     source = Path(sys.argv[1]) if len(sys.argv) > 1 else SOURCE
     collection = TTCollection(str(source))
@@ -35,6 +46,11 @@ def main() -> int:
     for code, face in FACES.items():
         messages = json.loads((ROOT / f"locale/{code}.json").read_text(encoding="utf-8"))
         text = "".join(v for k, v in messages.items() if not k.startswith("_")) + PICKER_NAMES
+        # The language's voice pack is shown too (the Voice Commands list,
+        # the popup after a command): locale/voice/<code>.json.
+        pack = ROOT / f"locale/voice/{code}.json"
+        if pack.exists():
+            text += _strings(json.loads(pack.read_text(encoding="utf-8")))
         chars = sorted({c for c in text if ord(c) > 0x7F})
         font = collection.fonts[face]
         options = subset.Options()

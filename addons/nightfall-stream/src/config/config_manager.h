@@ -46,6 +46,7 @@ public:
     int add_host(const Dictionary &data);
     void update_host(int index, const Dictionary &data);
     void remove_host(int index);
+    String get_host_name(const String &server_unique_id);
     void remove_superseded_hosts(const String &address, int https_port, const String &server_unique_id);
     void clear_hosts();
 

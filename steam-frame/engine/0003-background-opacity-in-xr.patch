@@ -1,0 +1,124 @@
+diff --git a/servers/rendering/renderer_rd/effects/tone_mapper.cpp b/servers/rendering/renderer_rd/effects/tone_mapper.cpp
+index 3ee5b78aa9..cbba80a7f8 100644
+--- a/servers/rendering/renderer_rd/effects/tone_mapper.cpp
++++ b/servers/rendering/renderer_rd/effects/tone_mapper.cpp
+@@ -244,6 +244,7 @@ void ToneMapper::tonemapper_mobile(RID p_source_color, RID p_dst_framebuffer, co
+ 	tonemap_mobile.push_constant.white = p_settings.white;
+ 	tonemap_mobile.push_constant.luminance_multiplier = p_settings.luminance_multiplier;
+ 	tonemap_mobile.push_constant.output_max_value = MAX(p_settings.max_value, 1.0f);
++	tonemap_mobile.push_constant.background_alpha = p_settings.background_alpha; // Nightfall
+ 
+ 	tonemap_mobile.push_constant.tonemapper_params[0] = p_settings.tonemapper_params[0];
+ 	tonemap_mobile.push_constant.tonemapper_params[1] = p_settings.tonemapper_params[1];
+@@ -335,6 +336,7 @@ void ToneMapper::tonemapper_subpass(RD::DrawListID p_subpass_draw_list, RID p_so
+ 	tonemap_mobile.push_constant.white = p_settings.white;
+ 	tonemap_mobile.push_constant.luminance_multiplier = p_settings.luminance_multiplier;
+ 	tonemap_mobile.push_constant.output_max_value = MAX(p_settings.max_value, 1.0f);
++	tonemap_mobile.push_constant.background_alpha = p_settings.background_alpha; // Nightfall
+ 
+ 	tonemap_mobile.push_constant.tonemapper_params[0] = p_settings.tonemapper_params[0];
+ 	tonemap_mobile.push_constant.tonemapper_params[1] = p_settings.tonemapper_params[1];
+diff --git a/servers/rendering/renderer_rd/effects/tone_mapper.h b/servers/rendering/renderer_rd/effects/tone_mapper.h
+index 68b6da1758..a567eaff53 100644
+--- a/servers/rendering/renderer_rd/effects/tone_mapper.h
++++ b/servers/rendering/renderer_rd/effects/tone_mapper.h
+@@ -138,7 +138,8 @@ private:
+ 
+ 		float tonemapper_params[4]; //  16 - 64
+ 		float output_max_value; //  4 - 68
+-		float pad[3]; //  12 - 80
++		float background_alpha; //  4 - 72 (Nightfall)
++		float pad[2]; //  8 - 80
+ 	};
+ 
+ 	/* tonemap actually writes to a framebuffer, which is
+@@ -164,6 +165,9 @@ public:
+ 	~ToneMapper();
+ 
+ 	struct TonemapSettings {
++		// Nightfall: opacity given to the transparent background (mobile tonemapper only).
++		float background_alpha = 0.0;
++
+ 		bool use_glow = false;
+ 		RSE::EnvironmentGlowBlendMode glow_mode = RSE::ENV_GLOW_BLEND_MODE_SCREEN;
+ 		float glow_intensity = 0.3;
+diff --git a/servers/rendering/renderer_rd/forward_mobile/render_forward_mobile.cpp b/servers/rendering/renderer_rd/forward_mobile/render_forward_mobile.cpp
+index 18367d9a57..e2ed1752c6 100644
+--- a/servers/rendering/renderer_rd/forward_mobile/render_forward_mobile.cpp
++++ b/servers/rendering/renderer_rd/forward_mobile/render_forward_mobile.cpp
+@@ -1150,6 +1150,17 @@ void RenderForwardMobile::_render_scene(RenderDataRD *p_render_data, const Color
+ 		clear_color = p_default_bg_color;
+ 	}
+ 
++	// Nightfall: in the stereo (XR) picture, a transparent background drawn
++	// with a custom background colour keeps that colour's opacity. The 3D
++	// buffer has 2 bits of alpha, so the background is still cleared to fully
++	// transparent below; the tonemapper applies the opacity instead, as it
++	// writes to the 8-bit render target. Everything else behaves as in stock
++	// Godot, which drops the opacity.
++	p_render_data->transparent_bg_alpha = 0.0f;
++	if (p_render_data->transparent_bg && p_render_data->scene_data->view_count > 1 && is_environment(p_render_data->environment) && environment_get_background(p_render_data->environment) == RSE::ENV_BG_COLOR && get_debug_draw_mode() != RSE::VIEWPORT_DEBUG_DRAW_OVERDRAW) {
++		p_render_data->transparent_bg_alpha = CLAMP(environment_get_bg_color(p_render_data->environment).a, 0.0f, 1.0f);
++	}
++
+ 	// We don't have access to any rendered buffers but we may be able to effect mesh data...
+ 	_process_compositor_effects(RSE::COMPOSITOR_EFFECT_CALLBACK_TYPE_PRE_OPAQUE, p_render_data);
+ 
+diff --git a/servers/rendering/renderer_rd/renderer_scene_render_rd.cpp b/servers/rendering/renderer_rd/renderer_scene_render_rd.cpp
+index fb4d422858..1930294ea3 100644
+--- a/servers/rendering/renderer_rd/renderer_scene_render_rd.cpp
++++ b/servers/rendering/renderer_rd/renderer_scene_render_rd.cpp
+@@ -810,6 +810,7 @@ void RendererSceneRenderRD::_render_buffers_post_process_and_tonemap(const Rende
+ 		if (can_use_storage) {
+ 			tone_mapper->tonemapper(color_texture, dest_fb, tonemap);
+ 		} else {
++			tonemap.background_alpha = p_render_data->transparent_bg_alpha; // Nightfall
+ 			tone_mapper->tonemapper_mobile(color_texture, dest_fb, tonemap);
+ 		}
+ 
+@@ -983,6 +984,7 @@ void RendererSceneRenderRD::_post_process_subpass(RID p_source_texture, RID p_fr
+ 		tonemap.debanding_mode = RendererRD::ToneMapper::TonemapSettings::DebandingMode::DEBANDING_MODE_DISABLED;
+ 	}
+ 
++	tonemap.background_alpha = p_render_data->transparent_bg_alpha; // Nightfall
+ 	tone_mapper->tonemapper_subpass(draw_list, p_source_texture, RD::get_singleton()->framebuffer_get_format(p_framebuffer), tonemap);
+ 
+ 	RD::get_singleton()->draw_command_end_label();
+diff --git a/servers/rendering/renderer_rd/shaders/effects/tonemap_mobile.glsl b/servers/rendering/renderer_rd/shaders/effects/tonemap_mobile.glsl
+index b3f3d944d8..b6963a941d 100644
+--- a/servers/rendering/renderer_rd/shaders/effects/tonemap_mobile.glsl
++++ b/servers/rendering/renderer_rd/shaders/effects/tonemap_mobile.glsl
+@@ -94,7 +94,8 @@ layout(push_constant, std430) uniform Params {
+ 	vec4 tonemapper_params;
+ 
+ 	float output_max_value;
+-	float pad[3];
++	float background_alpha; // Nightfall
++	float pad[2];
+ }
+ params;
+ 
+@@ -831,5 +832,11 @@ void main() {
+ 		color.rgb += screen_space_dither(gl_FragCoord.xy, 1023.0);
+ 	}
+ 
++	// Nightfall: give a transparent viewport's background the opacity its
++	// background colour asked for. Same result as drawing a black surface of
++	// that opacity behind everything else, at no cost and with the render
++	// target's full alpha precision.
++	color.a = mix(params.background_alpha, 1.0, color.a);
++
+ 	frag_color = color;
+ }
+diff --git a/servers/rendering/renderer_rd/storage_rd/render_data_rd.h b/servers/rendering/renderer_rd/storage_rd/render_data_rd.h
+index b11ed36661..1a33675c3a 100644
+--- a/servers/rendering/renderer_rd/storage_rd/render_data_rd.h
++++ b/servers/rendering/renderer_rd/storage_rd/render_data_rd.h
+@@ -81,6 +81,7 @@ public:
+ 
+ 	/* Viewport data */
+ 	bool transparent_bg = false;
++	float transparent_bg_alpha = 0.0; // Nightfall: opacity of a transparent viewport's background colour, applied when tonemapping.
+ 	Rect2i render_region;
+ 
+ 	/* Shadow data */

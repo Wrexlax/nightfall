@@ -55,6 +55,24 @@ const KEY_BYTES: usize = crate::crypto::KEY_BYTES;
 const ENCRYPTED_HEADER: usize = HEADER + KEY_BYTES;
 const TAG_BYTES: usize = crate::crypto::TAG_BYTES;
 const MIC_KDF_INFO: &[u8] = b"nightfall-meteor mic v2";
+/// The session key an encrypted packet carries in the clear (the sender's
+/// public key for this microphone session), if it is one.
+fn session_key(packet: &[u8]) -> Option<[u8; KEY_BYTES]> {
+    if packet.len() < ENCRYPTED_HEADER || &packet[..4] != MAGIC || packet[4] != VERSION_ENCRYPTED {
+        return None;
+    }
+    let mut key = [0u8; KEY_BYTES];
+    key.copy_from_slice(&packet[HEADER..ENCRYPTED_HEADER]);
+    Some(key)
+}
+
+/// Whether a packet belongs to the session already playing. Only an
+/// encrypted session can be recognised from another address: it is the key
+/// that says so, and the packet has been opened with it by then.
+fn same_session(playing: Option<[u8; KEY_BYTES]>, packet: Option<[u8; KEY_BYTES]>) -> bool {
+    playing.is_some() && playing == packet
+}
+
 /// Senders' derived keys kept at once (one per headset session).
 const MAX_SENDER_KEYS: usize = 8;
 const FRAME_SAMPLES: usize = 480;
@@ -134,6 +152,11 @@ struct Jitter {
     next: Option<u32>,
     last_packet: Option<Instant>,
     sender: Option<SocketAddr>,
+    /// The public key the sender made for this session (encrypted packets
+    /// carry it): the same session may arrive from a second address too.
+    session: Option<[u8; KEY_BYTES]>,
+    /// That second address, once seen (for the log).
+    also_from: Option<SocketAddr>,
 }
 
 pub struct Mic {
@@ -223,21 +246,39 @@ impl Mic {
         loop {
             let Ok((len, from)) = socket.recv_from(&mut buf).await else { continue };
             let ip = from.ip().to_canonical();
-            if !(ip.is_loopback() || allowed(ip)) {
+            // A sender already accepted keeps its stream while its packets
+            // keep coming, even if the streaming check briefly says no.
+            let continuing = self.jitter.lock().is_ok_and(|j| {
+                (j.sender == Some(from) || j.also_from == Some(from)) && j.last_packet.is_some_and(|t| t.elapsed() < Duration::from_secs(2))
+            });
+            if !(ip.is_loopback() || continuing || allowed(ip)) {
                 // Only a client that is streaming through Meteor may send.
                 if self.stats.rejected.fetch_add(1, Ordering::Relaxed) == 0 {
                     log::warn!("Ignoring microphone packets from {from}: it isn't streaming through Meteor");
                 }
                 continue;
             }
+            let session = session_key(&buf[..len]);
             let Some((seq, muted_on_headset, format, payload)) = self.open(&mut buf[..len], ip.is_loopback()) else { continue };
             self.stats.packets.fetch_add(1, Ordering::Relaxed);
             let Ok(mut jitter) = self.jitter.lock() else { return };
             if jitter.sender != Some(from) {
-                log::info!("Microphone stream from {from}");
-                jitter.frames.clear();
-                jitter.next = None;
-                jitter.sender = Some(from);
+                if same_session(jitter.session, session) {
+                    // The stream already playing, over the headset's second
+                    // link as well ("side-both"): every frame comes twice
+                    // and is played once, by its sequence number below.
+                    if jitter.also_from != Some(from) {
+                        log::info!("Microphone stream also arriving from {from} (the same session over a second link)");
+                        jitter.also_from = Some(from);
+                    }
+                } else {
+                    log::info!("Microphone stream from {from}");
+                    jitter.frames.clear();
+                    jitter.next = None;
+                    jitter.sender = Some(from);
+                    jitter.session = session;
+                    jitter.also_from = None;
+                }
             }
             jitter.last_packet = Some(Instant::now());
             // Late, or already played.
@@ -713,7 +754,10 @@ fn windows_audio(
             .ok_or("VB-CABLE render device not found. Install VB-CABLE, then restart Meteor; select CABLE Output as the recording device in your app")?;
         log::info!("Windows microphone output: {}", device.get_friendlyname().unwrap_or_default());
         let mut client = device.get_iaudioclient().map_err(|e| e.to_string())?;
-        let format = WaveFormat::new(16, 16, &SampleType::Int, 48_000, 1, None);
+        // Stereo, with the mono voice copied into both channels. Handing
+        // Windows a mono stream left the up-mix to the audio engine, which on
+        // VB-CABLE put the voice on the left channel only (or switched sides).
+        let format = WaveFormat::new(16, 16, &SampleType::Int, 48_000, 2, None);
         client.initialize_client(&format, &Direction::Render, &StreamMode::PollingShared {
             autoconvert: true,
             buffer_duration_hns: 500_000,
@@ -726,11 +770,18 @@ fn windows_audio(
         Ok(pair) => { let _ = ready.send(Ok(())); pair }
         Err(err) => { let _ = ready.send(Err(err)); return; }
     };
+    let mut stereo: Vec<u8> = Vec::new();
     while let Ok(pcm) = recv.recv() {
         let frames = pcm.len() / 2;
+        stereo.clear();
+        stereo.reserve(pcm.len() * 2);
+        for sample in pcm.chunks_exact(2) {
+            stereo.extend_from_slice(sample); // left
+            stereo.extend_from_slice(sample); // right
+        }
         match client.get_available_space_in_frames() {
             Ok(space) if space as usize >= frames => {
-                if let Err(err) = render.write_to_device(frames, &pcm, None) {
+                if let Err(err) = render.write_to_device(frames, &stereo, None) {
                     log::warn!("VB-CABLE audio write failed: {err}");
                     break;
                 }
@@ -867,6 +918,27 @@ impl VirtualMic {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_session_is_known_by_its_key_whatever_address_it_comes_from() {
+        let mut packet = vec![0u8; ENCRYPTED_HEADER + 20];
+        packet[..4].copy_from_slice(MAGIC);
+        packet[4] = VERSION_ENCRYPTED;
+        packet[HEADER..ENCRYPTED_HEADER].copy_from_slice(&[7u8; KEY_BYTES]);
+        let key = session_key(&packet);
+        assert_eq!(key, Some([7u8; KEY_BYTES]));
+        assert!(same_session(key, session_key(&packet)));
+        // Another session's key, a plain packet and a short one are not it.
+        let mut other = packet.clone();
+        other[HEADER] = 8;
+        assert!(!same_session(key, session_key(&other)));
+        packet[4] = VERSION_PLAIN;
+        assert_eq!(session_key(&packet), None);
+        assert_eq!(session_key(&other[..ENCRYPTED_HEADER - 1]), None);
+        // Nothing playing, or a plain session playing: never the same.
+        assert!(!same_session(None, session_key(&other)));
+        assert!(!same_session(None, None));
+    }
 
     #[cfg(target_os = "linux")]
     #[test]

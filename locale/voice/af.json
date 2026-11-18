@@ -1,0 +1,240 @@
+{
+	"whisper": "af",
+	"on": [
+		"aan",
+		"aanskakel",
+		"skakel aan"
+	],
+	"off": [
+		"af",
+		"afskakel",
+		"skakel af"
+	],
+	"next": [
+		"volgende",
+		"verander",
+		"wissel"
+	],
+	"enable": [
+		"aktiveer"
+	],
+	"disable": [
+		"deaktiveer"
+	],
+	"minus": [
+		"minus"
+	],
+	"plus": [
+		"plus"
+	],
+	"to": [
+		"na",
+		"op"
+	],
+	"drop": [
+		"die",
+		"n",
+		"asseblief",
+		"stel",
+		"sit"
+	],
+	"commands": {
+		"recenter": [
+			"hersentreer",
+			"sentreer",
+			"sentreer skerm"
+		],
+		"show menu": [
+			"wys kieslys",
+			"maak kieslys oop",
+			"wys menu"
+		],
+		"hide menu": [
+			"versteek kieslys",
+			"maak kieslys toe",
+			"versteek menu"
+		],
+		"menu": [
+			"kieslys",
+			"menu"
+		],
+		"show keyboard": [
+			"wys sleutelbord",
+			"maak sleutelbord oop"
+		],
+		"hide keyboard": [
+			"versteek sleutelbord",
+			"maak sleutelbord toe"
+		],
+		"keyboard": [
+			"sleutelbord"
+		],
+		"head lock on": [
+			"kopslot aan",
+			"sluit kop"
+		],
+		"head lock off": [
+			"kopslot af",
+			"ontsluit kop"
+		],
+		"volume up": [
+			"harder",
+			"volume op",
+			"volume hoër"
+		],
+		"volume down": [
+			"sagter",
+			"volume af",
+			"volume laer"
+		],
+		"volume #": [
+			"volume #"
+		],
+		"mute": [
+			"demp",
+			"klank af",
+			"stil"
+		],
+		"unmute": [
+			"ontdemp",
+			"klank aan"
+		],
+		"curve #": [
+			"kurwe #"
+		],
+		"flat screen": [
+			"plat skerm",
+			"plat",
+			"geen kurwe"
+		],
+		"passthrough fade #": [
+			"deursig verdof #",
+			"kamer verdof #"
+		],
+		"glow strength #": [
+			"gloedsterkte #"
+		],
+		"glow size #": [
+			"gloedgrootte #"
+		],
+		"separation #": [
+			"skeiding #"
+		],
+		"convergence #": [
+			"konvergensie #"
+		],
+		"select all": [
+			"kies alles",
+			"selekteer alles"
+		],
+		"copy": [
+			"kopieer"
+		],
+		"paste": [
+			"plak"
+		],
+		"cut": [
+			"knip"
+		],
+		"undo": [
+			"ontdoen"
+		],
+		"redo": [
+			"herdoen"
+		],
+		"save": [
+			"stoor",
+			"bewaar"
+		],
+		"find": [
+			"soek",
+			"vind"
+		],
+		"new tab": [
+			"nuwe oortjie"
+		],
+		"close tab": [
+			"maak oortjie toe",
+			"sluit oortjie"
+		],
+		"close window": [
+			"maak venster toe",
+			"sluit venster"
+		],
+		"switch window": [
+			"wissel venster"
+		],
+		"show desktop": [
+			"wys werkskerm"
+		],
+		"task manager": [
+			"taakbestuurder"
+		],
+		"start menu": [
+			"beginkieslys",
+			"windows sleutel"
+		],
+		"screenshot": [
+			"skermskoot"
+		],
+		"escape": [
+			"escape"
+		],
+		"enter": [
+			"enter"
+		],
+		"tab key": [
+			"tab sleutel"
+		],
+		"backspace": [
+			"backspace",
+			"terugspasie"
+		],
+		"delete": [
+			"delete",
+			"skrap"
+		],
+		"page up": [
+			"bladsy op"
+		],
+		"page down": [
+			"bladsy af"
+		]
+	},
+	"typing": {
+		"clear": [
+			"vee uit",
+			"maak skoon"
+		],
+		"submit": [
+			"stuur"
+		],
+		"new line": [
+			"nuwe reël"
+		],
+		"new paragraph": [
+			"nuwe paragraaf"
+		],
+		"open parenthesis": [
+			"hakie oop",
+			"oop hakie"
+		],
+		"close parenthesis": [
+			"hakie toe",
+			"toe hakie"
+		]
+	},
+	"help": [
+		"Sê ’n knoppie se naam en wat dit moet wees: elke knoppie in die kieslys werk so",
+		"Die knoppie se volgende waarde",
+		"’n Knoppie sonder keuse: net sy naam"
+	],
+	"list": {
+		"commands": "Opdragte",
+		"menu": "Enige knoppie in die kieslys",
+		"typing": "Terwyl jy dikteer",
+		"note": "Hou jou stemknoppie in en sê ’n opdrag op sy eie.",
+		"note_prefix": "Begin elke opdrag met “Nightfall”.",
+		"note_off": "Stemopdragte is af: alles wat jy sê word getik."
+	}
+}

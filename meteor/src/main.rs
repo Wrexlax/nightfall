@@ -37,6 +37,7 @@ mod host;
 use host::view as host_view;
 mod icon;
 mod logfile;
+mod media_keys;
 mod mic;
 mod net;
 mod ncnn;
@@ -523,6 +524,12 @@ async fn main() {
         host: host_view.discovery_info(),
         xr_port: xr_discovery,
         pairing: host_view.pairing.clone(),
+        streaming: {
+            let streaming = stats.clone();
+            let allowed: Arc<dyn Fn(std::net::IpAddr) -> bool + Send + Sync> =
+                Arc::new(move |ip: std::net::IpAddr| streaming.is_streaming(ip));
+            Some(allowed)
+        },
         #[cfg(windows)]
         vdd_installed: sunshine_vdd_installed(),
         #[cfg(target_os = "linux")]

@@ -251,6 +251,9 @@ void DepthBridge::set_depth_hz_cap(int hz) {
 
     env->CallStaticVoidMethod(app_class, method, (jint)hz);
     env->DeleteLocalRef(app_class);
+#elif defined(NIGHTFALL_FRAME_DEPTH)
+    ensure_midas_engine();
+    midas_engine_->set_rate(hz);
 #else
     (void)hz;
 #endif
@@ -361,7 +364,11 @@ int DepthBridge::get_depth_model_size() {
 }
 
 int DepthBridge::get_depth_model_width() {
-#ifdef NIGHTFALL_PLATFORM_LINUX
+#if defined(NIGHTFALL_FRAME_DEPTH)
+    // The Frame's models needn't be square (512x288).
+    ensure_midas_engine();
+    return midas_engine_->get_model_width();
+#elif defined(NIGHTFALL_PLATFORM_LINUX)
     return get_depth_model_size();
 #elif defined(__ANDROID__)
     JNIEnv *env = get_jni_env();
@@ -382,7 +389,10 @@ int DepthBridge::get_depth_model_width() {
 }
 
 int DepthBridge::get_depth_model_height() {
-#ifdef NIGHTFALL_PLATFORM_LINUX
+#if defined(NIGHTFALL_FRAME_DEPTH)
+    ensure_midas_engine();
+    return midas_engine_->get_model_height();
+#elif defined(NIGHTFALL_PLATFORM_LINUX)
     return get_depth_model_size();
 #elif defined(__ANDROID__)
     JNIEnv *env = get_jni_env();
@@ -604,6 +614,60 @@ String DepthBridge::export_diagnostics() {
 #endif
 }
 
+bool DepthBridge::has_decoder_depth() const {
+#ifdef NIGHTFALL_FRAME_DEPTH
+    return true;
+#else
+    return false;
+#endif
+}
+
+void DepthBridge::set_decoder_depth_enabled(bool enabled) {
+#ifdef NIGHTFALL_FRAME_DEPTH
+    // Not created just to be told it isn't wanted.
+    if (!enabled && !midas_engine_) return;
+    ensure_midas_engine();
+    midas_engine_->set_tap_enabled(enabled);
+#else
+    (void)enabled;
+#endif
+}
+
+void DepthBridge::set_decoder_depth_region(float x, float y, float width, float height) {
+#ifdef NIGHTFALL_FRAME_DEPTH
+    ensure_midas_engine();
+    midas_engine_->set_region(x, y, width, height);
+#else
+    (void)x; (void)y; (void)width; (void)height;
+#endif
+}
+
+bool DepthBridge::decoder_depth_model_present(int model_index) {
+#ifdef NIGHTFALL_FRAME_DEPTH
+    ensure_midas_engine();
+    return midas_engine_->model_present(model_index);
+#else
+    (void)model_index;
+    return false;
+#endif
+}
+
+void DepthBridge::set_decoder_depth_threads(int threads) {
+#ifdef NIGHTFALL_FRAME_DEPTH
+    ensure_midas_engine();
+    midas_engine_->set_threads(threads);
+#else
+    (void)threads;
+#endif
+}
+
+String DepthBridge::take_decoder_depth_report() {
+#ifdef NIGHTFALL_FRAME_DEPTH
+    if (midas_engine_) return String::utf8(midas_engine_->take_report().c_str());
+#endif
+    return String();
+}
+
 void DepthBridge::_bind_methods() {
     ClassDB::bind_method(D_METHOD("submit_depth_frame", "frame_data", "width", "height"), &DepthBridge::submit_depth_frame);
     ClassDB::bind_method(D_METHOD("get_depth_map"), &DepthBridge::get_depth_map);
@@ -625,4 +689,10 @@ void DepthBridge::_bind_methods() {
     ClassDB::bind_method(D_METHOD("get_depth_last_skipped_frames"), &DepthBridge::get_depth_last_skipped_frames);
     ClassDB::bind_method(D_METHOD("get_device_model"), &DepthBridge::get_device_model);
     ClassDB::bind_method(D_METHOD("export_diagnostics"), &DepthBridge::export_diagnostics);
+    ClassDB::bind_method(D_METHOD("has_decoder_depth"), &DepthBridge::has_decoder_depth);
+    ClassDB::bind_method(D_METHOD("decoder_depth_model_present", "model_index"), &DepthBridge::decoder_depth_model_present);
+    ClassDB::bind_method(D_METHOD("set_decoder_depth_enabled", "enabled"), &DepthBridge::set_decoder_depth_enabled);
+    ClassDB::bind_method(D_METHOD("set_decoder_depth_region", "x", "y", "width", "height"), &DepthBridge::set_decoder_depth_region);
+    ClassDB::bind_method(D_METHOD("set_decoder_depth_threads", "threads"), &DepthBridge::set_decoder_depth_threads);
+    ClassDB::bind_method(D_METHOD("take_decoder_depth_report"), &DepthBridge::take_decoder_depth_report);
 }

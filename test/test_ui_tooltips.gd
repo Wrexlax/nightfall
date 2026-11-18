@@ -17,8 +17,10 @@ func _run():
 	var controller := UIController.new(main)
 	controller._build_tooltip_surface()
 	assert(controller._tooltip_panel.get_parent() == main.ui_viewport)
-	assert(controller._tooltip_panel.position == Vector2(100, 0))
-	assert(controller._tooltip_panel.size == Vector2(1000, 64))
+	# The Steam Frame port made the tooltip bar larger; it stays centred.
+	var tip_size := Vector2(UIController.TOOLTIP_VIEWPORT_SIZE)
+	assert(controller._tooltip_panel.position == Vector2((1200 - tip_size.x) / 2.0, 0))
+	assert(controller._tooltip_panel.size == tip_size)
 
 	var first := Button.new()
 	first.set_meta(UIController.TOOLTIP_META, "First tooltip")

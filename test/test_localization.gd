@@ -55,14 +55,20 @@ func _init():
 		if Localization.CJK_FONTS.has(code):
 			_assert_font_covers(code, messages)
 
-	# Tooltips share a single 1000px bar (24px text, 24px margins) and are
-	# trimmed with an ellipsis beyond it.
+	# Tooltips share one bar, two lines tall (UIController.TOOLTIP_VIEWPORT_SIZE,
+	# 24px text, 24px margins, word wrap), and are trimmed with an ellipsis
+	# beyond that. Laid out as the bar's label lays them out, because where the
+	# words break decides whether a text fits. (Upstream's bar is one 1000px
+	# line and its check was a width of 952px; this port's own English tooltips
+	# are written for two lines, some with a line break of their own. A Label
+	# can't be asked here: outside the scene tree it reports one line.)
+	var bar_width := float(UIController.TOOLTIP_VIEWPORT_SIZE.x - 48)
 	for language in Localization.LANGUAGES:
 		Localization.apply(language["code"])
 		for text in _menu_tooltips():
-			var width := ThemeDB.fallback_font.get_string_size(Localization.t(text), HORIZONTAL_ALIGNMENT_LEFT, -1, 24).x
-			if width > 952:
-				_fail("%s tooltip too long (%dpx): %s" % [language["code"], width, Localization.t(text)])
+			var lines := _tooltip_lines(Localization.t(text), bar_width)
+			if lines > 2:
+				_fail("%s tooltip too long (%d lines): %s" % [language["code"], lines, Localization.t(text)])
 
 	if not _failures.is_empty():
 		for failure in _failures:
@@ -79,6 +85,13 @@ func _init():
 	assert(Localization.t("Settings") == "Settings")
 	print("All localization tests passed")
 	quit()
+
+func _tooltip_lines(text: String, width: float) -> int:
+	var paragraph := TextParagraph.new()
+	paragraph.break_flags = TextServer.BREAK_MANDATORY | TextServer.BREAK_WORD_BOUND | TextServer.BREAK_ADAPTIVE
+	paragraph.width = width
+	paragraph.add_string(text, ThemeDB.fallback_font, 24)
+	return paragraph.get_line_count()
 
 # The bundled subset must contain every character the dictionary uses; rerun
 # tools/i18n/build_cjk_fonts.py after editing a CJK dictionary.

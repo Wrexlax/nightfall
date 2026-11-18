@@ -23,6 +23,8 @@ public:
     void cleanup();
 
     int decode(const PackedByteArray &opus_data, int max_samples_per_frame);
+    // Packet-loss concealment for one missing packet of frame_samples.
+    int decode_plc(int frame_samples);
     PackedFloat32Array get_last_pcm() const { return last_pcm_; }
 
     int get_sample_rate() const { return sample_rate_; }

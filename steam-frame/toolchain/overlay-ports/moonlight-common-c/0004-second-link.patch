@@ -1,0 +1,892 @@
+Steam Frame: a second network path to the same host ("Multi-Link" for a
+stream that passes through Nightfall Meteor).
+
+The Steam Frame reaches its PC over the home Wi-Fi and over the wireless
+adapter's direct link at once. Steam's own streaming sends its packets over
+both and uses whichever copy arrives first. This is the headset's half of the
+same for Nightfall; Meteor on the PC is the other half (meteor/src/proxy.rs).
+
+What it changes, all for IPv4 streams only:
+- the video and audio sockets listen on every address of the device, not only
+  the one the stream started on, so copies sent to the device's address on
+  the second link reach them;
+- the video and audio pings (every 500 ms, carrying the 16-byte payload the
+  host made for this stream) are also sent to the address given to
+  LiSetSecondLink(). Meteor recognises the payload and starts sending copies;
+- the video receive loop notes which link each packet came over, for the
+  counts LiGetSecondLinkStats() returns. The RTP queue already drops a packet
+  it has seen, so the first copy to arrive is the one used.
+
+A second-link ping can carry two more bytes (LiSetSecondLinkChoice): the
+choice made on the headset (0 copies on both links, 1 the second link first,
+2 no second link) and the number of the last pick in Meteor's own menu that
+the headset has seen, which is how the two stay in step. They are only sent
+to a Meteor that says it understands them.
+
+With "the second link first" the headset itself judges whether that link is
+carrying the stream (LiSetSecondLinkWatch): the picture's packets over it, the
+holes in their numbering, and the sound's packets as a sign of life when the
+screen is still. While the link is not shown to be steady the pings say 3
+("the second link first, but both links for now") and Meteor sends copies over
+the first link too; a changed verdict is pinged at once, and while the second
+link is alone its pings go ten times a second, so that Meteor can tell a dead
+link in a fraction of a second as well. Only for a Meteor that says it knows
+3 ("link-hold").
+
+The control stream can go over both links as well (LiSetSecondLinkControl):
+its ENet socket is no longer tied to the address the stream started on, every
+datagram for the host is also sent to its address on the second link (ending
+with the stream's 16 bytes and "NFL2", by which Meteor knows the copy and
+whose it is), and a datagram that comes from there is handed to ENet as one
+from the first (enet/unix.c). ENet numbers what it sends and drops what it has seen, so
+either link can go silent without the connection being lost: tried with an
+ENet client and server and a relay that cuts each path in turn for 13
+seconds, against a 10 second timeout. Only for a Meteor that takes both as
+one peer ("control-both").
+
+With no address set (the default) the only difference from upstream is the
+wider listening address.
+
+diff --git a/enet/include/enet/enet.h b/enet/include/enet/enet.h
+index 791e303..53968a1 100644
+--- a/enet/include/enet/enet.h
++++ b/enet/include/enet/enet.h
+@@ -502,6 +502,9 @@ ENET_API int        enet_socket_get_address (ENetSocket, ENetAddress *);
+ ENET_API int        enet_socket_listen (ENetSocket, int);
+ ENET_API ENetSocket enet_socket_accept (ENetSocket, ENetAddress *);
+ ENET_API int        enet_socket_connect (ENetSocket, const ENetAddress *);
++/* Steam Frame (Nightfall): one peer over two network paths; see unix.c. */
++ENET_API void       enet_second_link_set (const struct sockaddr *, const struct sockaddr *, const void *, size_t);
++ENET_API void       enet_second_link_counts (unsigned long long *, unsigned long long *);
+ ENET_API int        enet_socket_send (ENetSocket, const ENetAddress *, const ENetAddress *, const ENetBuffer *, size_t);
+ ENET_API int        enet_socket_receive (ENetSocket, ENetAddress *, ENetAddress *, ENetBuffer *, size_t);
+ ENET_API int        enet_socket_wait (ENetSocket, enet_uint32 *, enet_uint32);
+diff --git a/enet/unix.c b/enet/unix.c
+index f5563c0..b0c5bf8 100644
+--- a/enet/unix.c
++++ b/enet/unix.c
+@@ -559,6 +559,77 @@ enet_socket_destroy (ENetSocket socket)
+       close (socket);
+ }
+ 
++/* Steam Frame (Nightfall): one peer reached over two network paths at once.
++ *
++ * The control stream is an ENet connection to one address. With a second
++ * path to the same host (moonlight-common-c, SecondLink.c) every datagram
++ * for that peer is sent to its address on the second path as well, and a
++ * datagram that arrives from there is handed up as if it had come from the
++ * first: ENet numbers what it sends, so whichever copy comes second is
++ * dropped as already seen, and either path can go silent without the
++ * connection noticing. The host must send its datagrams over both paths too
++ * and take ours from either as one peer (Nightfall Meteor does); anything
++ * else would see two peers. So that it can tell, each copy sent over the
++ * second path ends with a few bytes the caller supplies (the trailer), which
++ * name the stream; the host takes them off again. What the host sends over
++ * the second path has no trailer: it is known by where it comes from.
++ *
++ * ENet here follows a peer to whatever address its last datagram came from,
++ * and answers from the local address it arrived on (see
++ * enet_protocol_handle_incoming_commands); so for a datagram from the second
++ * path both are put back to the first path's, or the connection would hop
++ * between the two. */
++static struct sockaddr_storage secondLinkFirst, secondLinkSecond;
++static socklen_t secondLinkFirstLength, secondLinkSecondLength;
++static volatile int secondLinkSet;
++static ENetAddress secondLinkFirstLocal;
++static unsigned long long secondLinkFromFirst, secondLinkFromSecond;
++static unsigned char secondLinkTrailer [32];
++static size_t secondLinkTrailerLength;
++
++static int
++enet_second_link_same (const struct sockaddr_storage * a, const struct sockaddr_storage * b)
++{
++    const struct sockaddr_in * a4 = (const struct sockaddr_in *) a;
++    const struct sockaddr_in * b4 = (const struct sockaddr_in *) b;
++
++    return a -> ss_family == AF_INET && b -> ss_family == AF_INET &&
++           a4 -> sin_addr.s_addr == b4 -> sin_addr.s_addr && a4 -> sin_port == b4 -> sin_port;
++}
++
++/* The peer's address on the first path and on the second, both IPv4 with
++ * their ports, and the trailer for what is sent over the second (up to 32
++ * bytes); second NULL stops it. Clears the counts. */
++void
++enet_second_link_set (const struct sockaddr * first, const struct sockaddr * second, const void * trailer, size_t trailerLength)
++{
++    secondLinkSet = 0;
++    secondLinkFromFirst = secondLinkFromSecond = 0;
++    memset (& secondLinkFirstLocal, 0, sizeof (secondLinkFirstLocal));
++    if (first == NULL || second == NULL || first -> sa_family != AF_INET || second -> sa_family != AF_INET ||
++        trailerLength > sizeof (secondLinkTrailer))
++      return;
++
++    if (trailerLength > 0)
++      memcpy (secondLinkTrailer, trailer, trailerLength);
++    secondLinkTrailerLength = trailerLength;
++
++    memset (& secondLinkFirst, 0, sizeof (secondLinkFirst));
++    memset (& secondLinkSecond, 0, sizeof (secondLinkSecond));
++    memcpy (& secondLinkFirst, first, sizeof (struct sockaddr_in));
++    memcpy (& secondLinkSecond, second, sizeof (struct sockaddr_in));
++    secondLinkFirstLength = secondLinkSecondLength = sizeof (struct sockaddr_in);
++    secondLinkSet = 1;
++}
++
++/* Datagrams received over each path since enet_second_link_set(). */
++void
++enet_second_link_counts (unsigned long long * fromFirst, unsigned long long * fromSecond)
++{
++    * fromFirst = secondLinkFromFirst;
++    * fromSecond = secondLinkFromSecond;
++}
++
+ int
+ enet_socket_send (ENetSocket socket,
+                   const ENetAddress * peerAddress,
+@@ -674,6 +745,28 @@ enet_socket_send (ENetSocket socket,
+     }
+ 
+     sentLength = sendmsg (socket, & msgHdr, MSG_NOSIGNAL);
++
++    /* Steam Frame (Nightfall): and to the peer's address on the second path.
++       No local address is asked for: the route there picks it. Whether this
++       copy goes out or not is not the connection's business. */
++    if (secondLinkSet && peerAddress != NULL && bufferCount < 64 &&
++        enet_second_link_same (& peerAddress -> address, & secondLinkFirst))
++    {
++        struct msghdr second;
++        struct iovec parts [65];
++
++        /* The same buffers, then the trailer. */
++        memcpy (parts, buffers, bufferCount * sizeof (struct iovec));
++        parts [bufferCount].iov_base = secondLinkTrailer;
++        parts [bufferCount].iov_len = secondLinkTrailerLength;
++
++        memset (& second, 0, sizeof (second));
++        second.msg_name = (void *) & secondLinkSecond;
++        second.msg_namelen = secondLinkSecondLength;
++        second.msg_iov = parts;
++        second.msg_iovlen = bufferCount + (secondLinkTrailerLength > 0 ? 1 : 0);
++        sendmsg (socket, & second, MSG_NOSIGNAL);
++    }
+ #endif
+ 
+     if (sentLength == -1)
+@@ -814,6 +907,31 @@ enet_socket_receive (ENetSocket socket,
+ #endif
+     }
+ 
++    /* Steam Frame (Nightfall): a datagram from the peer's address on the
++       second path is handed up as one from the first (see above). */
++    if (secondLinkSet && peerAddress != NULL)
++    {
++        /* By its machine address alone: the host may answer over the second
++           path from another port than the one it listens on (Meteor does). */
++        if (peerAddress -> address.ss_family == AF_INET &&
++            ((const struct sockaddr_in *) & peerAddress -> address) -> sin_addr.s_addr ==
++            ((const struct sockaddr_in *) & secondLinkSecond) -> sin_addr.s_addr)
++        {
++            secondLinkFromSecond ++;
++            memcpy (& peerAddress -> address, & secondLinkFirst, sizeof (secondLinkFirst));
++            peerAddress -> addressLength = secondLinkFirstLength;
++            if (localAddress != NULL)
++              * localAddress = secondLinkFirstLocal;
++        }
++        else
++        if (enet_second_link_same (& peerAddress -> address, & secondLinkFirst))
++        {
++            secondLinkFromFirst ++;
++            if (localAddress != NULL)
++              secondLinkFirstLocal = * localAddress;
++        }
++    }
++
+     return recvLength;
+ #endif
+ }
+diff --git a/src/AudioStream.c b/src/AudioStream.c
+index 2fcc1f0..f69666b 100644
+--- a/src/AudioStream.c
++++ b/src/AudioStream.c
+@@ -55,6 +55,15 @@ static void AudioPingThreadProc(void* context) {
+             AudioPingPayload.sequenceNumber = BE32(pingCount);
+ 
+             sendto(rtpSocket, (char*)&AudioPingPayload, sizeof(AudioPingPayload), 0, (struct sockaddr*)&saddr, AddrLen);
++
++            // Steam Frame (Nightfall): and over the second link (SecondLink.c).
++            {
++                LC_SOCKADDR second;
++                char ping[sizeof(AudioPingPayload) + 2];
++                if (secondLinkAddress(&second, AudioPortNumber)) {
++                    sendto(rtpSocket, ping, secondLinkPing(&AudioPingPayload, sizeof(AudioPingPayload), ping), 0, (struct sockaddr*)&second, AddrLen);
++                }
++            }
+         }
+         else {
+             sendto(rtpSocket, legacyPingData, sizeof(legacyPingData), 0, (struct sockaddr*)&saddr, AddrLen);
+@@ -93,7 +102,11 @@ int notifyAudioPortNegotiationComplete(void) {
+ 
+     // For GFE 3.22 compatibility, we must start the audio ping thread before the RTSP handshake.
+     // It will not reply to our RTSP PLAY request until the audio ping has been received.
+-    rtpSocket = bindUdpSocket(RemoteAddr.ss_family, &LocalAddr, AddrLen, 0, SOCK_QOS_TYPE_AUDIO);
++    // Steam Frame (Nightfall): an IPv4 stream listens on every address of this
++    // device, not only the one the stream started on, so that copies sent to
++    // its address on a second link arrive too (SecondLink.c). The source of
++    // what it sends is still chosen by the route to each destination.
++    rtpSocket = bindUdpSocket(RemoteAddr.ss_family, RemoteAddr.ss_family == AF_INET ? NULL : &LocalAddr, AddrLen, 0, SOCK_QOS_TYPE_AUDIO);
+     if (rtpSocket == INVALID_SOCKET) {
+         return LastSocketFail();
+     }
+@@ -267,7 +280,14 @@ static void AudioReceiveThreadProc(void* context) {
+             }
+         }
+ 
+-        packet->header.size = recvUdpSocket(rtpSocket, &packet->data[0], MAX_PACKET_SIZE, useSelect);
++        // Steam Frame (Nightfall): sound keeps coming when the picture is
++        // still, so its packets are how a second link is known to be alive
++        // (SecondLink.c, secondLinkWatch).
++        struct sockaddr_storage from;
++        packet->header.size = recvUdpSocketFrom(rtpSocket, &packet->data[0], MAX_PACKET_SIZE, useSelect, &from);
++        if (packet->header.size > 0) {
++            secondLinkHeardAudio(&from);
++        }
+         if (packet->header.size < 0) {
+             Limelog("Audio Receive: recvUdpSocket() failed: %d\n", (int)LastSocketError());
+             ListenerCallbacks.connectionTerminated(LastSocketFail());
+diff --git a/src/ControlStream.c b/src/ControlStream.c
+index 2b5182e..21ef4e4 100644
+--- a/src/ControlStream.c
++++ b/src/ControlStream.c
+@@ -1767,9 +1767,15 @@ int startControlStream(void) {
+         enet_address_set_address(&remoteAddress, (struct sockaddr *)&RemoteAddr, AddrLen);
+         enet_address_set_port(&remoteAddress, ControlPortNumber);
+ 
+-        // Create a client
++        // Steam Frame (Nightfall): a new stream starts on one path; the second
++        // is asked for again once it is running (SecondLink.c).
++        secondLinkControlStarting();
++
++        // Create a client. Steam Frame (Nightfall): an IPv4 stream's control
++        // socket is not tied to the address the stream started on, so that it
++        // can reach the host over a second path too and hear it from there.
+         client = enet_host_create(RemoteAddr.ss_family,
+-                                  LocalAddr.ss_family != 0 ? &localAddress : NULL,
++                                  LocalAddr.ss_family != 0 && RemoteAddr.ss_family != AF_INET ? &localAddress : NULL,
+                                   1, CTRL_CHANNEL_COUNT, 0, 0);
+         if (client == NULL) {
+             stopping = true;
+diff --git a/src/Limelight-internal.h b/src/Limelight-internal.h
+index e1314c5..df1bffb 100644
+--- a/src/Limelight-internal.h
++++ b/src/Limelight-internal.h
+@@ -18,6 +18,15 @@ extern char* RemoteAddrString;
+ extern struct sockaddr_storage RemoteAddr;
+ extern struct sockaddr_storage LocalAddr;
+ extern SOCKADDR_LEN AddrLen;
++
++// Steam Frame (Nightfall): SecondLink.c
++bool secondLinkAddress(LC_SOCKADDR* addr, unsigned short port);
++void secondLinkCountVideo(const struct sockaddr_storage* from, unsigned short sequenceNumber);
++int secondLinkPing(const void* ping, int pingLength, char* out);
++void secondLinkHeardAudio(const struct sockaddr_storage* from);
++bool secondLinkWatch(void);
++void secondLinkControlStarting(void);
++void secondLinkStreamStarting(void);
+ extern int AppVersionQuad[4];
+ extern STREAM_CONFIGURATION StreamConfig;
+ extern CONNECTION_LISTENER_CALLBACKS ListenerCallbacks;
+diff --git a/src/Limelight.h b/src/Limelight.h
+index 11b8142..313c35f 100644
+--- a/src/Limelight.h
++++ b/src/Limelight.h
+@@ -572,6 +572,70 @@ const char* LiGetStageName(int stage);
+ // This function may only be called between LiStartConnection() and LiStopConnection().
+ bool LiGetEstimatedRttInfo(uint32_t* estimatedRtt, uint32_t* estimatedRttVariance);
+ 
++// Steam Frame (Nightfall): a second network path to the same host, for a
++// stream that passes through Nightfall Meteor. See SecondLink.c.
++//
++// LiSetSecondLink() gives the host's IPv4 address on the second link; NULL or
++// "" stops using it. It can be called at any time, before or during a stream,
++// and clears the counts below.
++void LiSetSecondLink(const char* address);
++
++// Video packets since LiSetSecondLink(): how many came over each link, and of
++// those old enough to judge, how many came over both, over the first only and
++// over the second only (the ones the second link saved). secondLinkFirst counts
++// the packets whose second-link copy arrived before the other.
++typedef struct _SECOND_LINK_STATS {
++    uint64_t firstLinkPackets;
++    uint64_t secondLinkPackets;
++    uint64_t bothLinks;
++    uint64_t onlyFirstLink;
++    uint64_t onlySecondLink;
++    uint64_t secondLinkFirst;
++    // Packets counted once however many copies came.
++    uint64_t packets;
++    // Holes in the second link's own numbering (packets it lost).
++    uint64_t secondLinkMissing;
++    // "The second link first", watched from this side (LiSetSecondLinkWatch):
++    // whether the second link is trusted alone right now, how many times it
++    // has stopped being (holds) and started again (alones), and of the last
++    // hold: why (1 nothing arriving, 2 packets missing), how many packets
++    // were missing in that tenth of a second, and how many milliseconds
++    // passed until the first link's first packet (0: not yet, or it was
++    // already bringing copies).
++    uint32_t alone;
++    uint32_t holds;
++    uint32_t alones;
++    uint32_t lastHoldReason;
++    uint32_t lastHoldMissing;
++    uint32_t lastHoldAnsweredMs;
++    // Control-stream datagrams that came over each link (LiSetSecondLinkControl).
++    uint64_t controlFirstLink;
++    uint64_t controlSecondLink;
++} SECOND_LINK_STATS;
++void LiGetSecondLinkStats(SECOND_LINK_STATS* stats);
++
++// What the second link's pings tell Meteor. choice: 0 copies on both links, 1
++// the second link first (alone while it holds), 2 no second link, -1 (the
++// default) nothing: plain pings, for a Meteor that knows no better
++// ("second-link-only" says it knows 0 and 1, "link-sync" all of this). rev: the
++// number of the last pick in Meteor's own menu that this side has seen, -1 to
++// send none.
++void LiSetSecondLinkChoice(int choice, int rev);
++
++// With choice 1, lets this side judge whether the second link is carrying the
++// stream well enough to be alone, and say 3 in its pings ("the second link
++// first, but both links for now") whenever it is not. Only for a Meteor that
++// knows 3 ("link-hold"); off by default.
++void LiSetSecondLinkWatch(bool enabled);
++
++// The control stream (input, and the connection's own "are you there") over
++// the second link as well: every datagram goes out over both and whichever
++// copy arrives first is used, so the stream outlives either link going
++// silent. Only for a Meteor that takes them as one peer ("control-both");
++// any other host would see two. Off by default, and off again at the start
++// of every stream: ask after the stream has started.
++void LiSetSecondLinkControl(bool enabled);
++
+ // This function queues a relative mouse move event to be sent to the remote server.
+ int LiSendMouseMoveEvent(short deltaX, short deltaY);
+ 
+diff --git a/src/PlatformSockets.c b/src/PlatformSockets.c
+index 41e7dd8..77642c7 100644
+--- a/src/PlatformSockets.c
++++ b/src/PlatformSockets.c
+@@ -179,7 +179,14 @@ bool isSocketReadable(SOCKET s) {
+ }
+ 
+ int recvUdpSocket(SOCKET s, char* buffer, int size, bool useSelect) {
++    return recvUdpSocketFrom(s, buffer, size, useSelect, NULL);
++}
++
++// Steam Frame (Nightfall, SecondLink.c): as recvUdpSocket(), and says who sent
++// the packet when "from" is given.
++int recvUdpSocketFrom(SOCKET s, char* buffer, int size, bool useSelect, struct sockaddr_storage* from) {
+     int err;
++    SOCKADDR_LEN fromLen;
+ 
+     do {
+         if (useSelect) {
+@@ -195,13 +202,15 @@ int recvUdpSocket(SOCKET s, char* buffer, int size, bool useSelect) {
+             }
+ 
+             // This won't block since the socket is readable
+-            err = (int)recvfrom(s, buffer, size, 0, NULL, NULL);
++            fromLen = sizeof(*from);
++            err = (int)recvfrom(s, buffer, size, 0, (struct sockaddr*)from, from ? &fromLen : NULL);
+         }
+         else {
+             // The caller has already configured a timeout on this
+             // socket via SO_RCVTIMEO, so we can avoid a syscall
+             // for each packet.
+-            err = (int)recvfrom(s, buffer, size, 0, NULL, NULL);
++            fromLen = sizeof(*from);
++            err = (int)recvfrom(s, buffer, size, 0, (struct sockaddr*)from, from ? &fromLen : NULL);
+             if (err < 0 &&
+                     (LastSocketError() == EWOULDBLOCK ||
+                      LastSocketError() == EINTR ||
+diff --git a/src/PlatformSockets.h b/src/PlatformSockets.h
+index 02a5445..25dbc95 100644
+--- a/src/PlatformSockets.h
++++ b/src/PlatformSockets.h
+@@ -127,6 +127,7 @@ SOCKET bindUdpSocket(int addressFamily, struct sockaddr_storage* localAddr, SOCK
+ int enableNoDelay(SOCKET s);
+ int setSocketNonBlocking(SOCKET s, bool enabled);
+ int recvUdpSocket(SOCKET s, char* buffer, int size, bool useSelect);
++int recvUdpSocketFrom(SOCKET s, char* buffer, int size, bool useSelect, struct sockaddr_storage* from);
+ void shutdownTcpSocket(SOCKET s);
+ int setNonFatalRecvTimeoutMs(SOCKET s, int timeoutMs);
+ void closeSocket(SOCKET s);
+diff --git a/src/SecondLink.c b/src/SecondLink.c
+new file mode 100644
+index 0000000..d0628ac
+--- /dev/null
++++ b/src/SecondLink.c
+@@ -0,0 +1,352 @@
++// Steam Frame (Nightfall): a second network path to the same host.
++//
++// The Steam Frame reaches its PC two ways at once: the home Wi-Fi, and the
++// direct link of the wireless adapter. Steam's own streaming ("Multi-Link")
++// sends its packets over both and uses whichever copy arrives first. This is
++// the client half of the same idea for a stream that passes through Nightfall
++// Meteor on the PC:
++//
++// - the video and audio sockets listen on every address of this device, not
++//   only the one the stream started on (see bindUdpSocket's callers);
++// - their pings, which already go to the host every 500 ms, also go to the
++//   host's address on the second link. A ping carries the 16-byte payload the
++//   host made for this stream alone, so Meteor can tell that the new sender
++//   is this stream and start sending copies of its packets there too;
++// - the RTP queue already drops a packet it has seen, so whichever copy comes
++//   first is used and the other costs nothing but the air time.
++//
++// Nothing happens until LiSetSecondLink() is given an address, and a host that
++// knows nothing of this ignores or mishandles the extra pings: the caller must
++// only set it for a Meteor that says it understands ("second-link").
++
++#include "Limelight-internal.h"
++
++static struct sockaddr_storage secondAddr;
++static volatile bool secondSet;
++// What the second link's pings tell Meteor in extra bytes. The choice: -1 sends
++// no byte (a Meteor that only knows plain pings), 0 both links, 1 the second
++// link first (alone while it holds), 2 no second link (the pings go on so that
++// Meteor knows the choice). Then the number of the last pick made in Meteor's
++// own menu that this side has seen, -1 to send none (meteor/src/proxy.rs,
++// LINK_WANTED).
++static volatile int secondChoice = -1;
++static volatile int secondRev = -1;
++
++// "The second link first" (choice 1), watched from this side. Meteor only
++// hears this device's pings, and a ping is small enough to get through a link
++// that can no longer carry the picture, so Meteor is the last to know that the
++// second link is failing. This side sees it at once: the picture's packets
++// stop, or come with holes. So while the choice is 1 the receive thread keeps
++// a verdict, in short windows:
++//
++// - alone: the second link is carrying the stream well; the pings say 1, and
++//   go ten times a second, so that Meteor too can tell a dead link quickly
++//   (it allows a few pings' worth of silence, whatever their pace).
++// - hold: it is not (or not yet shown to be); the pings say 3, "the second
++//   link first, but both links for now", and Meteor sends copies over the
++//   first link as well. A verdict that changes is sent at once, not at the
++//   next half second.
++//
++// It errs towards hold: a hold costs nothing but air time on the first link.
++// A still screen sends no picture, so "nothing arriving" counts the sound's
++// packets as well, which never stop.
++// Only for a Meteor that knows 3 ("link-hold"): LiSetSecondLinkWatch().
++#define WATCH_WINDOW_MS 100
++// Alone -> hold: this many windows in a row with nothing over the second link
++// (picture or sound), or one window with more than WATCH_LOSS_PERCENT of the
++// picture's packets missing.
++#define WATCH_SILENT_WINDOWS 2
++#define WATCH_LOSS_PERCENT 5
++#define WATCH_LOSS_MIN_PACKETS 4
++// Hold -> alone: this many good windows in a row (picture over the second
++// link, next to none of it missing, and about as much as the first link
++// brought). A window where it fell short starts the count again; a window
++// with next to no picture on either link (a still screen) does neither.
++#define WATCH_STEADY_WINDOWS 30
++#define WATCH_GOOD_MIN_PACKETS 10
++static volatile bool watchEnabled;
++static volatile bool watchAlone;
++static uint64_t watchWindowStart;
++static uint32_t watchFirst, watchSecond, watchMissing;
++// Sound packets over the second link in this window (counted by the audio
++// receive thread; a count that is one short now and then does no harm).
++static volatile uint32_t watchSecondAudio;
++static int watchSilentWindows, watchGoodWindows;
++static bool watchHaveSequence;
++static unsigned short watchLastSequence;
++// For the hold in progress: when it was asked for, and whether the first
++// link's first packet since has been timed yet.
++static uint64_t watchHoldAt;
++static bool watchHoldTimed;
++
++// One byte for every RTP sequence number: which links delivered it.
++#define VIA_FIRST 1
++#define VIA_SECOND 2
++static uint8_t seenVia[65536];
++static SECOND_LINK_STATS stats;
++
++static void applyControl(void);
++
++void LiSetSecondLink(const char* address) {
++    struct sockaddr_in* in = (struct sockaddr_in*)&secondAddr;
++
++    secondSet = false;
++    memset(&stats, 0, sizeof(stats));
++    memset(seenVia, 0, sizeof(seenVia));
++    watchAlone = false;
++    watchWindowStart = 0;
++    watchFirst = watchSecond = watchMissing = 0;
++    watchSecondAudio = 0;
++    watchSilentWindows = watchGoodWindows = 0;
++    watchHaveSequence = false;
++    watchHoldTimed = true;
++    if (address == NULL || address[0] == 0) {
++        applyControl();
++        return;
++    }
++
++    memset(&secondAddr, 0, sizeof(secondAddr));
++    in->sin_family = AF_INET;
++    if (inet_pton(AF_INET, address, &in->sin_addr) != 1) {
++        Limelog("Second link: '%s' is not an IPv4 address\n", address);
++        applyControl();
++        return;
++    }
++    secondSet = true;
++    applyControl();
++}
++
++// The control stream over both links (enet/unix.c, enet_second_link_set).
++static volatile bool controlWanted;
++
++// What ends every control datagram sent over the second link: the 16 bytes
++// the host made for this stream (the same that open the second link for the
++// picture, in the pings), then four letters. Meteor knows a copy by it, takes
++// it off, and passes the datagram on as the same peer's
++// (meteor/src/proxy.rs, control_trailer).
++static const char controlTrailerMark[4] = { 'N', 'F', 'L', '2' };
++
++static void applyControl(void) {
++    struct sockaddr_in first, second;
++    unsigned char trailer[sizeof(VideoPingPayload.payload) + sizeof(controlTrailerMark)];
++
++    if (!controlWanted || !secondSet || RemoteAddr.ss_family != AF_INET || ControlPortNumber == 0 ||
++        VideoPingPayload.payload[0] == 0) {
++        enet_second_link_set(NULL, NULL, NULL, 0);
++        return;
++    }
++    memcpy(&first, &RemoteAddr, sizeof(first));
++    first.sin_port = htons(ControlPortNumber);
++    memcpy(&second, &secondAddr, sizeof(second));
++    second.sin_port = htons(ControlPortNumber);
++    memcpy(trailer, VideoPingPayload.payload, sizeof(VideoPingPayload.payload));
++    memcpy(trailer + sizeof(VideoPingPayload.payload), controlTrailerMark, sizeof(controlTrailerMark));
++    enet_second_link_set((struct sockaddr*)&first, (struct sockaddr*)&second, trailer, sizeof(trailer));
++}
++
++void LiSetSecondLinkControl(bool enabled) {
++    controlWanted = enabled;
++    applyControl();
++}
++
++void secondLinkStreamStarting(void) {
++    LiSetSecondLink(NULL);
++}
++
++void secondLinkControlStarting(void) {
++    controlWanted = false;
++    enet_second_link_set(NULL, NULL, NULL, 0);
++}
++
++void LiSetSecondLinkWatch(bool enabled) {
++    watchEnabled = enabled;
++    if (!enabled) {
++        watchAlone = false;
++    }
++}
++
++void LiSetSecondLinkChoice(int choice, int rev) {
++    secondChoice = choice < 0 ? -1 : (choice > 2 ? 2 : choice);
++    secondRev = rev < 0 ? -1 : (rev & 0xff);
++}
++
++// The ping to send over the second link: the stream's own ping, then the
++// extra bytes that are to be sent. "out" must hold pingLength + 2 bytes.
++// Returns the length to send.
++int secondLinkPing(const void* ping, int pingLength, char* out) {
++    int choice = secondChoice;
++    int rev = secondRev;
++
++    memcpy(out, ping, pingLength);
++    if (choice < 0) {
++        return pingLength;
++    }
++    // The second link first, but not alone until it has shown itself steady.
++    out[pingLength] = (char)(choice == 1 && watchEnabled && !watchAlone ? 3 : choice);
++    if (rev < 0) {
++        return pingLength + 1;
++    }
++    out[pingLength + 1] = (char)rev;
++    return pingLength + 2;
++}
++
++bool secondLinkAddress(LC_SOCKADDR* addr, unsigned short port) {
++    // Only where the stream itself is IPv4, so that the one socket can send
++    // to both addresses.
++    if (!secondSet || RemoteAddr.ss_family != AF_INET) {
++        return false;
++    }
++    memcpy(addr, &secondAddr, sizeof(*addr));
++    SET_PORT(addr, port);
++    return true;
++}
++
++void secondLinkCountVideo(const struct sockaddr_storage* from, unsigned short sequenceNumber) {
++    uint8_t via;
++    uint8_t* seen;
++    uint8_t* old;
++
++    if (!secondSet || from->ss_family != AF_INET) {
++        return;
++    }
++
++    via = ((const struct sockaddr_in*)from)->sin_addr.s_addr ==
++          ((const struct sockaddr_in*)&secondAddr)->sin_addr.s_addr ? VIA_SECOND : VIA_FIRST;
++    if (via == VIA_SECOND) {
++        stats.secondLinkPackets++;
++        watchSecond++;
++        // Holes in the second link's own numbering: packets it lost.
++        if (watchHaveSequence) {
++            unsigned short gap = (unsigned short)(sequenceNumber - watchLastSequence - 1);
++            if (gap > 0 && gap < 2000) {
++                watchMissing += gap;
++                stats.secondLinkMissing += gap;
++            }
++            if (gap < 32768) {
++                watchLastSequence = sequenceNumber;
++            }
++        }
++        else {
++            watchHaveSequence = true;
++            watchLastSequence = sequenceNumber;
++        }
++    }
++    else {
++        stats.firstLinkPackets++;
++        watchFirst++;
++        if (!watchHoldTimed) {
++            // How long the first link took to answer the last hold.
++            watchHoldTimed = true;
++            stats.lastHoldAnsweredMs = (uint32_t)(PltGetMillis() - watchHoldAt) + 1;
++        }
++    }
++
++    seen = &seenVia[sequenceNumber];
++    if (*seen == 0) {
++        stats.packets++;
++        if (via == VIA_SECOND) {
++            // The second link's copy is the one that will be used.
++            stats.secondLinkFirst++;
++        }
++    }
++    *seen |= via;
++
++    // The number half the range away is some seconds old: both its copies
++    // have arrived by now if they ever will. Settle it and free its place.
++    old = &seenVia[(unsigned short)(sequenceNumber + 32768)];
++    if (*old == (VIA_FIRST | VIA_SECOND)) {
++        stats.bothLinks++;
++    }
++    else if (*old == VIA_FIRST) {
++        stats.onlyFirstLink++;
++    }
++    else if (*old == VIA_SECOND) {
++        stats.onlySecondLink++;
++    }
++    *old = 0;
++}
++
++void secondLinkHeardAudio(const struct sockaddr_storage* from) {
++    if (secondSet && from->ss_family == AF_INET &&
++        ((const struct sockaddr_in*)from)->sin_addr.s_addr == ((const struct sockaddr_in*)&secondAddr)->sin_addr.s_addr) {
++        watchSecondAudio++;
++    }
++}
++
++// Called by the video receive thread after every packet and every time its
++// wait for one runs out (100 ms), so a link that has gone silent is noticed
++// too. Closes a window when one is due and gives the verdict. Returns true
++// when a second-link ping is to be sent now: the verdict changed, or the
++// second link is alone (its pings then go at this pace).
++bool secondLinkWatch(void) {
++    uint64_t now;
++    bool silent, lossy, good, bad, was;
++
++    if (!secondSet || !watchEnabled || secondChoice != 1) {
++        watchAlone = false;
++        watchWindowStart = 0;
++        stats.alone = 0;
++        return false;
++    }
++
++    now = PltGetMillis();
++    if (watchWindowStart == 0) {
++        watchWindowStart = now;
++        watchFirst = watchSecond = watchMissing = 0;
++        watchSecondAudio = 0;
++        watchSilentWindows = watchGoodWindows = 0;
++        return false;
++    }
++    if (now - watchWindowStart < WATCH_WINDOW_MS) {
++        return false;
++    }
++
++    silent = watchSecond == 0 && watchSecondAudio == 0;
++    lossy = watchMissing >= WATCH_LOSS_MIN_PACKETS &&
++            watchMissing * 100 > (watchSecond + watchMissing) * WATCH_LOSS_PERCENT;
++    good = watchSecond >= WATCH_GOOD_MIN_PACKETS && watchMissing * 50 <= watchSecond &&
++           watchSecond * 10 >= watchFirst * 7;
++    bad = !good && (watchFirst >= WATCH_GOOD_MIN_PACKETS || watchMissing >= 2);
++    was = watchAlone;
++
++    if (watchAlone) {
++        watchSilentWindows = silent ? watchSilentWindows + 1 : 0;
++        if (lossy || watchSilentWindows >= WATCH_SILENT_WINDOWS) {
++            watchAlone = false;
++            watchGoodWindows = 0;
++            stats.holds++;
++            stats.lastHoldReason = lossy ? 2 : 1;
++            stats.lastHoldMissing = watchMissing;
++            stats.lastHoldAnsweredMs = 0;
++            watchHoldAt = now;
++            // Timed only if the first link was not already bringing copies.
++            watchHoldTimed = watchFirst > 0;
++        }
++    }
++    else if (good) {
++        if (++watchGoodWindows >= WATCH_STEADY_WINDOWS) {
++            watchAlone = true;
++            watchSilentWindows = 0;
++            stats.alones++;
++        }
++    }
++    else if (bad) {
++        watchGoodWindows = 0;
++    }
++
++    stats.alone = watchAlone ? 1 : 0;
++    watchWindowStart = now;
++    watchFirst = watchSecond = watchMissing = 0;
++    watchSecondAudio = 0;
++    return was != watchAlone || watchAlone;
++}
++
++void LiGetSecondLinkStats(SECOND_LINK_STATS* out) {
++    unsigned long long first = 0, second = 0;
++
++    // Read while the receive thread counts: a figure may be one packet behind.
++    memcpy(out, &stats, sizeof(stats));
++    enet_second_link_counts(&first, &second);
++    out->controlFirstLink = first;
++    out->controlSecondLink = second;
++}
+diff --git a/src/VideoStream.c b/src/VideoStream.c
+index 402b056..8dd4641 100644
+--- a/src/VideoStream.c
++++ b/src/VideoStream.c
+@@ -36,6 +36,11 @@ static bool receivedFullFrame;
+ 
+ // Initialize the video stream
+ void initializeVideoStream(void) {
++    // Steam Frame (Nightfall): a second link belongs to one stream. One left
++    // set by the stream before would be pinged from this stream's first
++    // moment, before the caller has looked for the host there again.
++    secondLinkStreamStarting();
++
+     initializeVideoDepacketizer(StreamConfig.packetSize);
+     RtpvInitializeQueue(&rtpQueue);
+     decryptionCtx = PltCreateCryptoContext();
+@@ -72,6 +77,16 @@ static void VideoPingThreadProc(void* context) {
+             VideoPingPayload.sequenceNumber = BE32(pingCount);
+ 
+             sendto(rtpSocket, (char*)&VideoPingPayload, sizeof(VideoPingPayload), 0, (struct sockaddr*)&saddr, AddrLen);
++
++            // Steam Frame (Nightfall): the same ping over the second link, which
++            // is how Meteor learns to send copies there (SecondLink.c).
++            {
++                LC_SOCKADDR second;
++                char ping[sizeof(VideoPingPayload) + 2];
++                if (secondLinkAddress(&second, VideoPortNumber)) {
++                    sendto(rtpSocket, ping, secondLinkPing(&VideoPingPayload, sizeof(VideoPingPayload), ping), 0, (struct sockaddr*)&second, AddrLen);
++                }
++            }
+         }
+         else {
+             sendto(rtpSocket, legacyPingData, sizeof(legacyPingData), 0, (struct sockaddr*)&saddr, AddrLen);
+@@ -81,6 +96,18 @@ static void VideoPingThreadProc(void* context) {
+     }
+ }
+ 
++// Steam Frame (Nightfall): a second-link ping now, not at the ping thread's
++// next half second: the verdict on the second link has just changed
++// (SecondLink.c, secondLinkWatch).
++static void sendSecondLinkPingNow(void) {
++    LC_SOCKADDR second;
++    char ping[sizeof(VideoPingPayload) + 2];
++
++    if (VideoPingPayload.payload[0] != 0 && secondLinkAddress(&second, VideoPortNumber)) {
++        sendto(rtpSocket, ping, secondLinkPing(&VideoPingPayload, sizeof(VideoPingPayload), ping), 0, (struct sockaddr*)&second, AddrLen);
++    }
++}
++
+ // Receive thread proc
+ static void VideoReceiveThreadProc(void* context) {
+     int err;
+@@ -91,6 +118,7 @@ static void VideoReceiveThreadProc(void* context) {
+     bool useSelect;
+     int waitingForVideoMs;
+     bool encrypted;
++    struct sockaddr_storage from;
+ 
+     encrypted = !!(EncryptionFeaturesEnabled & SS_ENC_VIDEO);
+     decryptedSize = StreamConfig.packetSize + MAX_RTP_HEADER_SIZE;
+@@ -134,16 +162,22 @@ static void VideoReceiveThreadProc(void* context) {
+             }
+         }
+ 
+-        err = recvUdpSocket(rtpSocket,
+-                            encrypted ? encryptedBuffer : buffer,
+-                            receiveSize,
+-                            useSelect);
++        err = recvUdpSocketFrom(rtpSocket,
++                                encrypted ? encryptedBuffer : buffer,
++                                receiveSize,
++                                useSelect,
++                                &from);
+         if (err < 0) {
+             Limelog("Video Receive: recvUdpSocket() failed: %d\n", (int)LastSocketError());
+             ListenerCallbacks.connectionTerminated(LastSocketFail());
+             break;
+         }
+         else if  (err == 0) {
++            // Steam Frame (Nightfall): nothing for 100 ms is news too.
++            if (secondLinkWatch()) {
++                sendSecondLinkPingNow();
++            }
++
+             if (!receivedDataFromPeer) {
+                 // If we wait many seconds without ever receiving a video packet,
+                 // assume something is broken and terminate the connection.
+@@ -227,6 +261,12 @@ static void VideoReceiveThreadProc(void* context) {
+         packet->timestamp = BE32(packet->timestamp);
+         packet->ssrc = BE32(packet->ssrc);
+ 
++        // Steam Frame (Nightfall): which link brought it (counts only).
++        secondLinkCountVideo(&from, packet->sequenceNumber);
++        if (secondLinkWatch()) {
++            sendSecondLinkPingNow();
++        }
++
+         queueStatus = RtpvAddPacket(&rtpQueue, packet, err, (PRTPV_QUEUE_ENTRY)&buffer[decryptedSize]);
+ 
+         if (queueStatus == RTPF_RET_QUEUED) {
+@@ -328,7 +368,11 @@ int startVideoStream(void* rendererContext, int drFlags) {
+         return err;
+     }
+ 
+-    rtpSocket = bindUdpSocket(RemoteAddr.ss_family, &LocalAddr, AddrLen,
++    // Steam Frame (Nightfall): an IPv4 stream listens on every address of this
++    // device, not only the one the stream started on, so that copies sent to
++    // its address on a second link arrive too (SecondLink.c). The source of
++    // what it sends is still chosen by the route to each destination.
++    rtpSocket = bindUdpSocket(RemoteAddr.ss_family, RemoteAddr.ss_family == AF_INET ? NULL : &LocalAddr, AddrLen,
+                               RTP_RECV_PACKETS_BUFFERED * (StreamConfig.packetSize + MAX_RTP_HEADER_SIZE),
+                               SOCK_QOS_TYPE_VIDEO);
+     if (rtpSocket == INVALID_SOCKET) {

@@ -1,0 +1,275 @@
+{
+	"whisper": "pt",
+	"on": [
+		"ligado",
+		"ligada",
+		"ativado",
+		"ativada",
+		"ligar",
+		"ativar"
+	],
+	"off": [
+		"desligado",
+		"desligada",
+		"desativado",
+		"desativada",
+		"desligar",
+		"desativar"
+	],
+	"next": [
+		"próximo",
+		"próxima",
+		"seguinte",
+		"mudar",
+		"trocar"
+	],
+	"enable": [
+		"ative",
+		"ativa",
+		"ligue",
+		"liga"
+	],
+	"disable": [
+		"desative",
+		"desativa",
+		"desligue",
+		"desliga"
+	],
+	"minus": [
+		"menos"
+	],
+	"plus": [
+		"mais"
+	],
+	"to": [
+		"para",
+		"em",
+		"a"
+	],
+	"drop": [
+		"o",
+		"os",
+		"as",
+		"um",
+		"uma",
+		"por favor",
+		"de",
+		"do",
+		"da",
+		"coloque",
+		"colocar",
+		"ajuste",
+		"defina"
+	],
+	"commands": {
+		"recenter": [
+			"recentralizar",
+			"centralizar",
+			"recentralizar tela",
+			"centralizar tela"
+		],
+		"show menu": [
+			"mostrar menu",
+			"abrir menu"
+		],
+		"hide menu": [
+			"ocultar menu",
+			"fechar menu",
+			"esconder menu"
+		],
+		"menu": [
+			"menu"
+		],
+		"show keyboard": [
+			"mostrar teclado",
+			"abrir teclado"
+		],
+		"hide keyboard": [
+			"ocultar teclado",
+			"fechar teclado",
+			"esconder teclado"
+		],
+		"keyboard": [
+			"teclado"
+		],
+		"head lock on": [
+			"trava cabeça ligado",
+			"travar cabeça",
+			"trava cabeça ligada",
+			"trava cabeça ativada"
+		],
+		"head lock off": [
+			"trava cabeça desligado",
+			"destravar cabeça",
+			"trava cabeça desligada",
+			"trava cabeça desativada"
+		],
+		"volume up": [
+			"aumentar volume",
+			"mais alto",
+			"subir volume"
+		],
+		"volume down": [
+			"diminuir volume",
+			"mais baixo",
+			"baixar volume"
+		],
+		"volume #": [
+			"volume #"
+		],
+		"mute": [
+			"mudo",
+			"silenciar",
+			"sem som"
+		],
+		"unmute": [
+			"reativar som",
+			"tirar mudo",
+			"som ligado"
+		],
+		"curve #": [
+			"curvatura #"
+		],
+		"flat screen": [
+			"tela plana",
+			"plano",
+			"sem curvatura"
+		],
+		"passthrough fade #": [
+			"escurecer passthrough #",
+			"escurecer sala #"
+		],
+		"glow strength #": [
+			"intensidade brilho #"
+		],
+		"glow size #": [
+			"tamanho brilho #"
+		],
+		"separation #": [
+			"separação #"
+		],
+		"convergence #": [
+			"convergência #"
+		],
+		"select all": [
+			"selecionar tudo"
+		],
+		"copy": [
+			"copiar"
+		],
+		"paste": [
+			"colar"
+		],
+		"cut": [
+			"recortar",
+			"cortar"
+		],
+		"undo": [
+			"desfazer"
+		],
+		"redo": [
+			"refazer"
+		],
+		"save": [
+			"salvar"
+		],
+		"find": [
+			"localizar",
+			"procurar",
+			"buscar"
+		],
+		"new tab": [
+			"nova aba",
+			"nova guia"
+		],
+		"close tab": [
+			"fechar aba",
+			"fechar guia"
+		],
+		"close window": [
+			"fechar janela"
+		],
+		"switch window": [
+			"trocar janela",
+			"alternar janela"
+		],
+		"show desktop": [
+			"mostrar área trabalho"
+		],
+		"task manager": [
+			"gerenciador tarefas"
+		],
+		"start menu": [
+			"menu iniciar",
+			"tecla windows"
+		],
+		"screenshot": [
+			"captura tela",
+			"print"
+		],
+		"escape": [
+			"escape",
+			"esc"
+		],
+		"enter": [
+			"enter"
+		],
+		"tab key": [
+			"tecla tab",
+			"tabulação"
+		],
+		"backspace": [
+			"backspace",
+			"apagar para trás"
+		],
+		"delete": [
+			"delete",
+			"excluir"
+		],
+		"page up": [
+			"página acima",
+			"page up"
+		],
+		"page down": [
+			"página abaixo",
+			"page down"
+		]
+	},
+	"typing": {
+		"clear": [
+			"apagar",
+			"apaga",
+			"limpar"
+		],
+		"submit": [
+			"enviar"
+		],
+		"new line": [
+			"nova linha"
+		],
+		"new paragraph": [
+			"novo parágrafo"
+		],
+		"open parenthesis": [
+			"abrir parênteses",
+			"abre parênteses"
+		],
+		"close parenthesis": [
+			"fechar parênteses",
+			"fecha parênteses"
+		]
+	},
+	"help": [
+		"Diga o nome de um botão e como ele deve ficar: funciona assim com todos os botões do menu",
+		"O próximo valor do botão",
+		"Um botão sem nada para escolher: só o nome"
+	],
+	"list": {
+		"commands": "Comandos",
+		"menu": "Qualquer botão do menu",
+		"typing": "Ao ditar",
+		"note": "Segure seu botão de voz e diga um comando sozinho.",
+		"note_prefix": "Comece cada comando com “Nightfall”.",
+		"note_off": "Os comandos de voz estão desligados: tudo o que você diz é digitado."
+	}
+}

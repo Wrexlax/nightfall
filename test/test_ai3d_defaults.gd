@@ -4,6 +4,7 @@ class Stream extends RefCounted:
 	func meteor_depth_info(): return {}
 
 class Fixture extends Node3D:
+	var device_is_steam_frame := false # the Steam Frame port reads this from main
 	var settings := AppSettings.new()
 	var is_streaming := false
 	var stream_manager := Stream.new()

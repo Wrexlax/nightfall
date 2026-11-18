@@ -1,0 +1,244 @@
+diff --git a/modules/openxr/extensions/openxr_fb_foveation_extension.cpp b/modules/openxr/extensions/openxr_fb_foveation_extension.cpp
+index d87a4fa346..8ff0a757c0 100644
+--- a/modules/openxr/extensions/openxr_fb_foveation_extension.cpp
++++ b/modules/openxr/extensions/openxr_fb_foveation_extension.cpp
+@@ -153,6 +153,8 @@ void *OpenXRFBFoveationExtension::set_system_properties_and_get_next_pointer(voi
+ 
+ void *OpenXRFBFoveationExtension::set_swapchain_create_info_and_get_next_pointer(void *p_next_pointer) {
+ 	void *next = p_next_pointer;
++	// Nightfall, temporary diagnostic: is a swapchain asked for with the runtime's foveation or without.
++	print_line(vformat("OpenXR: creating a swapchain %s the runtime's foveation (level %d, extension %s)", (is_enabled() && foveation_level > 0) ? "WITH" : "without", (int)foveation_level, is_enabled() ? "ready" : "not ready"));
+ 	if (is_enabled() && foveation_level > 0) {
+ 		swapchain_create_info_foveation_fb.next = next;
+ 		next = &swapchain_create_info_foveation_fb;
+@@ -230,6 +232,12 @@ void OpenXRFBFoveationExtension::get_fragment_density_offsets(LocalVector<Vector
+ 		print_line("OpenXR: Unable to get foveation offsets [", openxr_api->get_error_string(result), "]");
+ 		return;
+ 	}
++	// Nightfall, temporary diagnostic: what the runtime says about where the sharp area is. About every 5 s.
++	static uint32_t nightfall_offset_calls = 0;
++	if ((nightfall_offset_calls++ % 360) == 0) {
++		print_line(vformat("OpenXR: eye-tracked foveation state: %s, centres (%.3f, %.3f) (%.3f, %.3f)", (state.flags & XR_FOVEATION_EYE_TRACKED_STATE_VALID_BIT_META) ? "valid" : "NOT valid",
++				state.foveationCenter[0].x, state.foveationCenter[0].y, state.foveationCenter[1].x, state.foveationCenter[1].y));
++	}
+ 	if (!(state.flags & XR_FOVEATION_EYE_TRACKED_STATE_VALID_BIT_META)) {
+ 		return;
+ 	}
+diff --git a/modules/openxr/openxr_api.cpp b/modules/openxr/openxr_api.cpp
+index 2fa25ccba3..c0286926e9 100644
+--- a/modules/openxr/openxr_api.cpp
++++ b/modules/openxr/openxr_api.cpp
+@@ -38,6 +38,7 @@
+ #include "core/config/project_settings.h"
+ #include "core/object/callable_mp.h"
+ #include "core/os/memory.h"
++#include "core/os/os.h" // Nightfall, temporary diagnostic (frame pacing)
+ #include "core/profiling/profiling.h"
+ #include "core/version.h"
+ #include "servers/rendering/rendering_server.h"
+@@ -195,7 +196,10 @@ bool OpenXRAPI::OpenXRSwapChainInfo::acquire(bool &p_should_render) {
+ 			nullptr // next
+ 		};
+ 
++		const uint64_t nightfall_acquire_start = OS::get_singleton()->get_ticks_usec(); // Nightfall, temporary diagnostic (frame pacing)
+ 		result = openxr_api->xrAcquireSwapchainImage(swapchain, &swapchain_image_acquire_info, &image_index);
++		openxr_api->nightfall_pacing.acquire_usec += OS::get_singleton()->get_ticks_usec() - nightfall_acquire_start;
++		openxr_api->nightfall_pacing.acquires++;
+ 		if (!XR_UNQUALIFIED_SUCCESS(result)) {
+ 			// Make sure end_frame knows we need to submit an empty frame
+ 			p_should_render = false;
+@@ -219,7 +223,11 @@ bool OpenXRAPI::OpenXRSwapChainInfo::acquire(bool &p_should_render) {
+ 
+ 	// Wait for a maximum of 10 seconds before calling it a critical failure...
+ 	for (int retry = 0; retry < 10; retry++) {
++		const uint64_t nightfall_image_wait_start = OS::get_singleton()->get_ticks_usec(); // Nightfall, temporary diagnostic (frame pacing)
+ 		result = openxr_api->xrWaitSwapchainImage(swapchain, &swapchain_image_wait_info);
++		const uint64_t nightfall_image_wait = OS::get_singleton()->get_ticks_usec() - nightfall_image_wait_start;
++		openxr_api->nightfall_pacing.image_wait_usec += nightfall_image_wait;
++		openxr_api->nightfall_pacing.image_wait_longest = MAX(openxr_api->nightfall_pacing.image_wait_longest, nightfall_image_wait);
+ 		if (result != XR_TIMEOUT_EXPIRED) {
+ 			break;
+ 		}
+@@ -264,7 +272,9 @@ bool OpenXRAPI::OpenXRSwapChainInfo::release() {
+ 		XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO, // type
+ 		nullptr // next
+ 	};
++	const uint64_t nightfall_release_start = OS::get_singleton()->get_ticks_usec(); // Nightfall, temporary diagnostic (frame pacing)
+ 	XrResult result = openxr_api->xrReleaseSwapchainImage(swapchain, &swapchain_image_release_info);
++	openxr_api->nightfall_pacing.release_usec += OS::get_singleton()->get_ticks_usec() - nightfall_release_start;
+ 	if (XR_FAILED(result)) {
+ 		print_line("OpenXR: failed to release swapchain image! [", openxr_api->get_error_string(result), "]");
+ 		return false;
+@@ -1670,6 +1680,7 @@ bool OpenXRAPI::resolve_instance_openxr_symbols() {
+ 	OPENXR_API_INIT_XR_FUNC_V(xrEnumerateViewConfigurationViews);
+ 	OPENXR_API_INIT_XR_FUNC_V(xrGetActionStateBoolean);
+ 	OPENXR_API_INIT_XR_FUNC_V(xrGetActionStateFloat);
++	OPENXR_API_INIT_XR_FUNC_V(xrGetActionStatePose); // Nightfall, temporary diagnostic (eye gaze)
+ 	OPENXR_API_INIT_XR_FUNC_V(xrGetActionStateVector2f);
+ 	OPENXR_API_INIT_XR_FUNC_V(xrGetCurrentInteractionProfile);
+ 	OPENXR_API_INIT_XR_FUNC_V(xrGetReferenceSpaceBoundsRect);
+@@ -2373,7 +2384,57 @@ bool OpenXRAPI::process() {
+ 	frame_state.predictedDisplayPeriod = 0;
+ 	frame_state.shouldRender = false;
+ 
++	const uint64_t nightfall_wait_start = OS::get_singleton()->get_ticks_usec(); // Nightfall, temporary diagnostic (frame pacing)
++	const XrTime nightfall_previous_display_time = nightfall_pacing.display_time;
+ 	XrResult result = xrWaitFrame(session, &frame_wait_info, &frame_state);
++	nightfall_pacing.wait_end = OS::get_singleton()->get_ticks_usec();
++	if (XR_SUCCEEDED(result) && frame_state.predictedDisplayPeriod > 0) {
++		// How the runtime paces the app: how long it holds the app in
++		// xrWaitFrame, and how many display refreshes apart it schedules the
++		// app's frames (1 = every refresh, 2 = half rate).
++		nightfall_pacing.frames++;
++		nightfall_pacing.wait_usec += nightfall_pacing.wait_end - nightfall_wait_start;
++		nightfall_pacing.period = frame_state.predictedDisplayPeriod;
++		if (nightfall_previous_display_time > 0) {
++			nightfall_pacing.spacing_sum += double(frame_state.predictedDisplayTime - nightfall_previous_display_time) / double(frame_state.predictedDisplayPeriod);
++			nightfall_pacing.spacings++;
++		}
++		nightfall_pacing.display_time = frame_state.predictedDisplayTime;
++		if (nightfall_pacing.wait_end - nightfall_pacing.report_start >= 1000000) {
++			if (nightfall_pacing.report_start > 0 && nightfall_pacing.spacings > 0 && nightfall_pacing.work_frames > 0) {
++				print_line(vformat("OpenXR: frame pacing: %d frames; display period %.2f ms; frames scheduled %.2f periods apart; held in xrWaitFrame %.2f ms; wait to end of frame %.2f ms average, %.2f ms longest",
++						nightfall_pacing.frames, nightfall_pacing.period / 1000000.0, nightfall_pacing.spacing_sum / nightfall_pacing.spacings,
++						nightfall_pacing.wait_usec / 1000.0 / nightfall_pacing.frames,
++						nightfall_pacing.work_usec / 1000.0 / nightfall_pacing.work_frames, nightfall_pacing.work_longest / 1000.0));
++				// Where that time goes, per frame: the calls into the runtime that
++				// may wait, and what is left for the engine and the app.
++				const double nightfall_frames = nightfall_pacing.work_frames;
++				const double nightfall_in_runtime = (nightfall_pacing.begin_usec + nightfall_pacing.acquire_usec + nightfall_pacing.image_wait_usec + nightfall_pacing.release_usec + nightfall_pacing.end_usec) / 1000.0 / nightfall_frames;
++				print_line(vformat("OpenXR: frame parts: xrBeginFrame %.2f ms; acquiring images %.2f ms; waiting for images %.2f ms (longest single wait %.2f ms); releasing images %.2f ms; xrEndFrame %.2f ms; everything else %.2f ms; %.1f images and %.1f layers a frame",
++						nightfall_pacing.begin_usec / 1000.0 / nightfall_frames, nightfall_pacing.acquire_usec / 1000.0 / nightfall_frames,
++						nightfall_pacing.image_wait_usec / 1000.0 / nightfall_frames, nightfall_pacing.image_wait_longest / 1000.0,
++						nightfall_pacing.release_usec / 1000.0 / nightfall_frames, nightfall_pacing.end_usec / 1000.0 / nightfall_frames,
++						nightfall_pacing.work_usec / 1000.0 / nightfall_frames - nightfall_in_runtime,
++						nightfall_pacing.acquires / nightfall_frames, nightfall_pacing.layers / nightfall_frames));
++			}
++			nightfall_pacing.report_start = nightfall_pacing.wait_end;
++			nightfall_pacing.frames = 0;
++			nightfall_pacing.wait_usec = 0;
++			nightfall_pacing.spacing_sum = 0.0;
++			nightfall_pacing.spacings = 0;
++			nightfall_pacing.work_usec = 0;
++			nightfall_pacing.work_frames = 0;
++			nightfall_pacing.work_longest = 0;
++			nightfall_pacing.begin_usec = 0;
++			nightfall_pacing.acquire_usec = 0;
++			nightfall_pacing.image_wait_usec = 0;
++			nightfall_pacing.image_wait_longest = 0;
++			nightfall_pacing.release_usec = 0;
++			nightfall_pacing.end_usec = 0;
++			nightfall_pacing.acquires = 0;
++			nightfall_pacing.layers = 0;
++		}
++	}
+ 	if (XR_FAILED(result)) {
+ 		print_line("OpenXR: xrWaitFrame() was not successful [", get_error_string(result), "]");
+ 
+@@ -2499,7 +2560,9 @@ void OpenXRAPI::pre_render() {
+ 		XR_TYPE_FRAME_BEGIN_INFO, // type
+ 		nullptr // next
+ 	};
++	const uint64_t nightfall_begin_start = OS::get_singleton()->get_ticks_usec(); // Nightfall, temporary diagnostic (frame pacing)
+ 	result = xrBeginFrame(session, &frame_begin_info);
++	nightfall_pacing.begin_usec += OS::get_singleton()->get_ticks_usec() - nightfall_begin_start;
+ 	if (XR_FAILED(result)) {
+ 		print_line("OpenXR: failed to begin frame [", get_error_string(result), "]");
+ 		return;
+@@ -2809,7 +2872,16 @@ void OpenXRAPI::end_frame() {
+ 		static_cast<uint32_t>(layers_list.size()), // layerCount
+ 		layers_list.ptr() // layers
+ 	};
++	const uint64_t nightfall_end_start = OS::get_singleton()->get_ticks_usec(); // Nightfall, temporary diagnostic (frame pacing)
+ 	result = xrEndFrame(session, &frame_end_info);
++	nightfall_pacing.end_usec += OS::get_singleton()->get_ticks_usec() - nightfall_end_start;
++	nightfall_pacing.layers += layers_list.size();
++	if (nightfall_pacing.wait_end > 0) {
++		const uint64_t work = OS::get_singleton()->get_ticks_usec() - nightfall_pacing.wait_end;
++		nightfall_pacing.work_usec += work;
++		nightfall_pacing.work_frames++;
++		nightfall_pacing.work_longest = MAX(nightfall_pacing.work_longest, work);
++	}
+ 	if (XR_FAILED(result)) {
+ 		print_line("OpenXR: failed to end frame! [", get_error_string(result), "]");
+ 		return;
+@@ -4007,6 +4079,21 @@ XRPose::TrackingConfidence OpenXRAPI::get_action_pose(RID p_action, RID p_tracke
+ 		return XRPose::XR_TRACKING_CONFIDENCE_NONE;
+ 	}
+ 
++	// Nightfall, temporary diagnostic: what the runtime answers for the eye
++	// gaze pose (no gaze reaches the app on the Steam Frame). About every 5 s.
++	if (tracker->name == "/user/eyes_ext") {
++		static uint32_t nightfall_eye_calls = 0;
++		if ((nightfall_eye_calls++ % 360) == 0) {
++			XrActionStateGetInfo get_info = { XR_TYPE_ACTION_STATE_GET_INFO, nullptr, action->handle, tracker->toplevel_path };
++			XrActionStatePose pose_state = { XR_TYPE_ACTION_STATE_POSE, nullptr, XR_FALSE };
++			XrResult state_result = xrGetActionStatePose(session, &get_info, &pose_state);
++			print_line(vformat("OpenXR: eye gaze reading: action %s, locate flags 0x%x, orientation (%.3f, %.3f, %.3f, %.3f), action state %s, active %s",
++					action->name, (int64_t)location.locationFlags,
++					location.pose.orientation.x, location.pose.orientation.y, location.pose.orientation.z, location.pose.orientation.w,
++					XR_FAILED(state_result) ? get_error_string(state_result) : String("ok"), pose_state.isActive ? "yes" : "no"));
++		}
++	}
++
+ 	XRPose::TrackingConfidence confidence = transform_from_location(location, r_transform);
+ 	parse_velocities(velocity, r_linear_velocity, r_angular_velocity);
+ 
+diff --git a/modules/openxr/openxr_api.h b/modules/openxr/openxr_api.h
+index 8ca2e44e82..e56f99a091 100644
+--- a/modules/openxr/openxr_api.h
++++ b/modules/openxr/openxr_api.h
+@@ -146,6 +146,27 @@ private:
+ 	XrSessionState session_state = XR_SESSION_STATE_UNKNOWN;
+ 	bool running = false;
+ 	XrFrameState frame_state = { XR_TYPE_FRAME_STATE, nullptr, 0, 0, false };
++	struct NightfallPacing { // Nightfall, temporary diagnostic (frame pacing)
++		uint64_t report_start = 0;
++		uint64_t wait_end = 0;
++		uint64_t wait_usec = 0;
++		uint64_t work_usec = 0;
++		uint64_t work_longest = 0;
++		uint64_t begin_usec = 0;
++		uint64_t acquire_usec = 0;
++		uint64_t image_wait_usec = 0;
++		uint64_t image_wait_longest = 0;
++		uint64_t release_usec = 0;
++		uint64_t end_usec = 0;
++		uint32_t acquires = 0;
++		uint32_t layers = 0;
++		uint32_t frames = 0;
++		uint32_t work_frames = 0;
++		uint32_t spacings = 0;
++		double spacing_sum = 0.0;
++		XrTime display_time = 0;
++		XrDuration period = 0;
++	} nightfall_pacing;
+ 	double render_target_size_multiplier = 1.0;
+ 	Rect2i render_region;
+ 
+@@ -238,6 +259,7 @@ private:
+ 	EXT_PROTO_XRRESULT_FUNC6(xrEnumerateViewConfigurationViews, (XrInstance), instance, (XrSystemId), systemId, (XrViewConfigurationType), viewConfigurationType, (uint32_t), viewCapacityInput, (uint32_t *), viewCountOutput, (XrViewConfigurationView *), views)
+ 	EXT_PROTO_XRRESULT_FUNC3(xrGetActionStateBoolean, (XrSession), session, (const XrActionStateGetInfo *), getInfo, (XrActionStateBoolean *), state)
+ 	EXT_PROTO_XRRESULT_FUNC3(xrGetActionStateFloat, (XrSession), session, (const XrActionStateGetInfo *), getInfo, (XrActionStateFloat *), state)
++	EXT_PROTO_XRRESULT_FUNC3(xrGetActionStatePose, (XrSession), session, (const XrActionStateGetInfo *), getInfo, (XrActionStatePose *), state) // Nightfall, temporary diagnostic (eye gaze)
+ 	EXT_PROTO_XRRESULT_FUNC3(xrGetActionStateVector2f, (XrSession), session, (const XrActionStateGetInfo *), getInfo, (XrActionStateVector2f *), state)
+ 	EXT_PROTO_XRRESULT_FUNC3(xrGetCurrentInteractionProfile, (XrSession), session, (XrPath), topLevelUserPath, (XrInteractionProfileState *), interactionProfile)
+ 	EXT_PROTO_XRRESULT_FUNC2(xrGetInstanceProperties, (XrInstance), instance, (XrInstanceProperties *), instanceProperties)
+diff --git a/modules/openxr/openxr_interface.cpp b/modules/openxr/openxr_interface.cpp
+index 38e7916a34..6b09704c33 100644
+--- a/modules/openxr/openxr_interface.cpp
++++ b/modules/openxr/openxr_interface.cpp
+@@ -1648,6 +1648,13 @@ RID OpenXRInterface::get_vrs_texture() {
+ 	}
+ 
+ 	RID density_map = openxr_api->get_density_map_texture();
++	// Nightfall, temporary diagnostic: whose density map the scene is drawn with.
++	static int nightfall_map_source = -1;
++	const int map_source = density_map.is_valid() ? 1 : 0;
++	if (map_source != nightfall_map_source) {
++		nightfall_map_source = map_source;
++		print_line(map_source ? "OpenXR: density map in use: the runtime's (from the swapchain)" : "OpenXR: density map in use: Godot's own, made here (the swapchain has none)");
++	}
+ 	if (density_map.is_valid()) {
+ 		return density_map;
+ 	}

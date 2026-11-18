@@ -1,0 +1,239 @@
+{
+	"whisper": "sv",
+	"on": [
+		"på",
+		"slå på",
+		"sätt på"
+	],
+	"off": [
+		"av",
+		"stäng av",
+		"slå av"
+	],
+	"next": [
+		"nästa",
+		"byt"
+	],
+	"enable": [
+		"aktivera"
+	],
+	"disable": [
+		"inaktivera",
+		"avaktivera"
+	],
+	"minus": [
+		"minus"
+	],
+	"plus": [
+		"plus"
+	],
+	"to": [
+		"till"
+	],
+	"drop": [
+		"den",
+		"det",
+		"en",
+		"ett",
+		"tack",
+		"snälla",
+		"sätt",
+		"ställ"
+	],
+	"commands": {
+		"recenter": [
+			"centrera",
+			"centrera skärm",
+			"centrera om"
+		],
+		"show menu": [
+			"visa meny",
+			"öppna meny"
+		],
+		"hide menu": [
+			"dölj meny",
+			"stäng meny"
+		],
+		"menu": [
+			"meny"
+		],
+		"show keyboard": [
+			"visa tangentbord",
+			"öppna tangentbord"
+		],
+		"hide keyboard": [
+			"dölj tangentbord",
+			"stäng tangentbord"
+		],
+		"keyboard": [
+			"tangentbord"
+		],
+		"head lock on": [
+			"huvudlås på",
+			"lås huvud"
+		],
+		"head lock off": [
+			"huvudlås av",
+			"lås upp huvud"
+		],
+		"volume up": [
+			"högre",
+			"höj volymen",
+			"volym upp"
+		],
+		"volume down": [
+			"lägre",
+			"sänk volymen",
+			"volym ner"
+		],
+		"volume #": [
+			"volym #"
+		],
+		"mute": [
+			"tyst",
+			"ljud av",
+			"stäng av ljudet"
+		],
+		"unmute": [
+			"ljud på",
+			"slå på ljudet"
+		],
+		"curve #": [
+			"kurvatur #"
+		],
+		"flat screen": [
+			"platt skärm",
+			"platt",
+			"ingen kurvatur"
+		],
+		"passthrough fade #": [
+			"dämpa passthrough #",
+			"dämpa rummet #"
+		],
+		"glow strength #": [
+			"glödstyrka #"
+		],
+		"glow size #": [
+			"glödstorlek #"
+		],
+		"separation #": [
+			"separation #"
+		],
+		"convergence #": [
+			"konvergens #"
+		],
+		"select all": [
+			"markera allt",
+			"välj allt"
+		],
+		"copy": [
+			"kopiera"
+		],
+		"paste": [
+			"klistra in"
+		],
+		"cut": [
+			"klipp ut",
+			"klipp"
+		],
+		"undo": [
+			"ångra"
+		],
+		"redo": [
+			"gör om"
+		],
+		"save": [
+			"spara"
+		],
+		"find": [
+			"sök",
+			"hitta"
+		],
+		"new tab": [
+			"ny flik"
+		],
+		"close tab": [
+			"stäng flik"
+		],
+		"close window": [
+			"stäng fönster"
+		],
+		"switch window": [
+			"byt fönster"
+		],
+		"show desktop": [
+			"visa skrivbord"
+		],
+		"task manager": [
+			"aktivitetshanteraren"
+		],
+		"start menu": [
+			"startmeny",
+			"windows tangent"
+		],
+		"screenshot": [
+			"skärmbild",
+			"skärmklipp"
+		],
+		"escape": [
+			"escape"
+		],
+		"enter": [
+			"enter",
+			"retur"
+		],
+		"tab key": [
+			"tabb",
+			"tabb tangent"
+		],
+		"backspace": [
+			"backsteg"
+		],
+		"delete": [
+			"delete",
+			"radera"
+		],
+		"page up": [
+			"sida upp"
+		],
+		"page down": [
+			"sida ner"
+		]
+	},
+	"typing": {
+		"clear": [
+			"rensa",
+			"radera"
+		],
+		"submit": [
+			"skicka"
+		],
+		"new line": [
+			"ny rad"
+		],
+		"new paragraph": [
+			"nytt stycke"
+		],
+		"open parenthesis": [
+			"vänsterparentes",
+			"öppna parentes"
+		],
+		"close parenthesis": [
+			"högerparentes",
+			"stäng parentes"
+		]
+	},
+	"help": [
+		"Säg en knapps namn och vad den ska vara: så fungerar alla knappar i menyn",
+		"Knappens nästa värde",
+		"En knapp utan val: bara dess namn"
+	],
+	"list": {
+		"commands": "Kommandon",
+		"menu": "Alla knappar i menyn",
+		"typing": "När du dikterar",
+		"note": "Håll in din röstknapp och säg ett kommando för sig.",
+		"note_prefix": "Börja varje kommando med ”Nightfall”.",
+		"note_off": "Röstkommandon är av: allt du säger skrivs."
+	}
+}

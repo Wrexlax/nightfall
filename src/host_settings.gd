@@ -60,3 +60,11 @@ var virtual_display_max_count: int = 0
 var virtual_display_count: int = 0
 ## Capture only the virtual monitors; the physical ones stay on the desk and out of the stream.
 var virtual_only: bool = false
+
+# What a saved Separation / Convergence may be. Wider than the cycle buttons'
+# lists: the Steam Frame's sliders reach 25-400% and 0-100%.
+static func separation_valid(pct: int) -> bool:
+	return pct >= 25 and pct <= 400 and pct % 25 == 0
+
+static func convergence_valid(pct: int) -> bool:
+	return pct >= 0 and pct <= 100 and pct % 5 == 0

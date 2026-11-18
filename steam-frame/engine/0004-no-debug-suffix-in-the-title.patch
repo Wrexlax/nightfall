@@ -1,0 +1,42 @@
+diff --git a/main/main.cpp b/main/main.cpp
+index b8a7c6c356..82369dbd5e 100644
+--- a/main/main.cpp
++++ b/main/main.cpp
+@@ -4660,14 +4660,9 @@ int Main::start() {
+ 			sml->set_quit_on_go_back(GLOBAL_GET("application/config/quit_on_go_back"));
+ 			String appname = GLOBAL_GET("application/config/name");
+ 			appname = TranslationServer::get_singleton()->translate(appname);
+-#ifdef DEBUG_ENABLED
+-			// Append a suffix to the window title to denote that the project is running
+-			// from a debug build (including the editor). Since this results in lower performance,
+-			// this should be clearly presented to the user.
+-			DisplayServer::get_singleton()->window_set_title(vformat("%s (DEBUG)", appname));
+-#else
++			// Nightfall for Steam Frame: no " (DEBUG)" suffix. The Frame build is
++			// released on this debug template, and the title is the name SteamOS shows.
+ 			DisplayServer::get_singleton()->window_set_title(appname);
+-#endif
+ 
+ 			bool snap_controls = GLOBAL_GET("gui/common/snap_controls_to_pixels");
+ 			sml->get_root()->set_snap_controls_to_pixels(snap_controls);
+diff --git a/scene/main/window.cpp b/scene/main/window.cpp
+index bc56ddbd7b..d59c8d09f1 100644
+--- a/scene/main/window.cpp
++++ b/scene/main/window.cpp
+@@ -3326,15 +3326,7 @@ void Window::_mouse_leave_viewport() {
+ void Window::_update_displayed_title() {
+ 	displayed_title = atr(title);
+ 
+-#ifdef DEBUG_ENABLED
+-	if (window_id == DisplayServerEnums::MAIN_WINDOW_ID && !Engine::get_singleton()->is_project_manager_hint()) {
+-		// Append a suffix to the window title to denote that the project is running
+-		// from a debug build (including the editor, excluding the project manager).
+-		// Since this results in lower performance, this should be clearly presented
+-		// to the user.
+-		displayed_title = vformat("%s (DEBUG)", displayed_title);
+-	}
+-#endif
++	// Nightfall for Steam Frame: no " (DEBUG)" suffix (see main/main.cpp).
+ 
+ 	if (embedder) {
+ 		embedder->_sub_window_update(this);

@@ -1,0 +1,248 @@
+{
+	"whisper": "cs",
+	"on": [
+		"zap",
+		"zapnuto",
+		"zapnout",
+		"zapni"
+	],
+	"off": [
+		"vyp",
+		"vypnuto",
+		"vypnout",
+		"vypni"
+	],
+	"next": [
+		"další",
+		"přepnout",
+		"změnit"
+	],
+	"enable": [
+		"aktivovat",
+		"aktivuj",
+		"povolit"
+	],
+	"disable": [
+		"deaktivovat",
+		"deaktivuj",
+		"zakázat"
+	],
+	"minus": [
+		"minus",
+		"mínus"
+	],
+	"plus": [
+		"plus"
+	],
+	"to": [
+		"na"
+	],
+	"drop": [
+		"prosím",
+		"nastav",
+		"nastavit"
+	],
+	"commands": {
+		"recenter": [
+			"vystředit",
+			"vycentrovat",
+			"vystředit obrazovku"
+		],
+		"show menu": [
+			"zobrazit nabídku",
+			"otevřít nabídku",
+			"zobrazit menu"
+		],
+		"hide menu": [
+			"skrýt nabídku",
+			"zavřít nabídku",
+			"skrýt menu"
+		],
+		"menu": [
+			"nabídka",
+			"menu"
+		],
+		"show keyboard": [
+			"zobrazit klávesnici",
+			"otevřít klávesnici"
+		],
+		"hide keyboard": [
+			"skrýt klávesnici",
+			"zavřít klávesnici"
+		],
+		"keyboard": [
+			"klávesnice"
+		],
+		"head lock on": [
+			"zámek hlavy zap",
+			"zámek hlavy zapnout",
+			"zamknout hlavu"
+		],
+		"head lock off": [
+			"zámek hlavy vyp",
+			"zámek hlavy vypnout",
+			"odemknout hlavu"
+		],
+		"volume up": [
+			"hlasitěji",
+			"zvýšit hlasitost",
+			"hlasitost nahoru"
+		],
+		"volume down": [
+			"tišeji",
+			"snížit hlasitost",
+			"hlasitost dolů"
+		],
+		"volume #": [
+			"hlasitost #"
+		],
+		"mute": [
+			"ztlumit",
+			"vypnout zvuk",
+			"ticho"
+		],
+		"unmute": [
+			"zrušit ztlumení",
+			"zapnout zvuk"
+		],
+		"curve #": [
+			"zakřivení #"
+		],
+		"flat screen": [
+			"plochá obrazovka",
+			"plochá",
+			"bez zakřivení"
+		],
+		"passthrough fade #": [
+			"ztmavení passthrough #",
+			"ztmavit místnost #"
+		],
+		"glow strength #": [
+			"síla záře #"
+		],
+		"glow size #": [
+			"velikost záře #"
+		],
+		"separation #": [
+			"oddělení #"
+		],
+		"convergence #": [
+			"konvergence #"
+		],
+		"select all": [
+			"vybrat vše",
+			"označit vše"
+		],
+		"copy": [
+			"kopírovat"
+		],
+		"paste": [
+			"vložit"
+		],
+		"cut": [
+			"vyjmout"
+		],
+		"undo": [
+			"zpět",
+			"vrátit zpět"
+		],
+		"redo": [
+			"znovu",
+			"opakovat"
+		],
+		"save": [
+			"uložit"
+		],
+		"find": [
+			"najít",
+			"hledat"
+		],
+		"new tab": [
+			"nová karta",
+			"nový panel"
+		],
+		"close tab": [
+			"zavřít kartu",
+			"zavřít panel"
+		],
+		"close window": [
+			"zavřít okno"
+		],
+		"switch window": [
+			"přepnout okno"
+		],
+		"show desktop": [
+			"zobrazit plochu"
+		],
+		"task manager": [
+			"správce úloh"
+		],
+		"start menu": [
+			"nabídka start",
+			"klávesa windows"
+		],
+		"screenshot": [
+			"snímek obrazovky"
+		],
+		"escape": [
+			"escape"
+		],
+		"enter": [
+			"enter"
+		],
+		"tab key": [
+			"tabulátor"
+		],
+		"backspace": [
+			"backspace"
+		],
+		"delete": [
+			"delete",
+			"smazat"
+		],
+		"page up": [
+			"stránka nahoru",
+			"page up"
+		],
+		"page down": [
+			"stránka dolů",
+			"page down"
+		]
+	},
+	"typing": {
+		"clear": [
+			"vymazat",
+			"smazat"
+		],
+		"submit": [
+			"odeslat"
+		],
+		"new line": [
+			"nový řádek"
+		],
+		"new paragraph": [
+			"nový odstavec"
+		],
+		"open parenthesis": [
+			"otevřít závorku",
+			"levá závorka"
+		],
+		"close parenthesis": [
+			"zavřít závorku",
+			"pravá závorka"
+		]
+	},
+	"help": [
+		"Řekněte název tlačítka a čím má být: takto funguje každé tlačítko v nabídce",
+		"Další hodnota tlačítka",
+		"Tlačítko bez volby: jen jeho název"
+	],
+	"list": {
+		"commands": "Příkazy",
+		"menu": "Libovolné tlačítko v nabídce",
+		"typing": "Při diktování",
+		"note": "Držte hlasové tlačítko a řekněte příkaz samostatně.",
+		"note_prefix": "Každý příkaz začněte slovem „Nightfall“.",
+		"note_off": "Hlasové příkazy jsou vypnuté: vše, co řeknete, se napíše."
+	}
+}

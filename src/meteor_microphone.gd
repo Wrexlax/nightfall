@@ -23,15 +23,20 @@ var _last_error := ""
 var _log_at := 0.0
 var _logged_packets := 0
 var _peak := 0.0
+# Steam Frame: Meteor's address on the second link that the microphone is
+# also being sent to ("" for none).
+var _second := ""
 
 func _init(owner) -> void:
 	main = owner
 
 static func is_supported() -> bool:
-	return OS.get_name() == "Android"
+	# Android (Quest) and Linux (Steam Frame, captured with miniaudio).
+	return OS.get_name() == "Android" or OS.get_name() == "Linux"
 
 static func has_permission() -> bool:
-	return not is_supported() or OS.get_granted_permissions().has(PERMISSION)
+	# Only Android asks for a runtime permission.
+	return OS.get_name() != "Android" or OS.get_granted_permissions().has(PERMISSION)
 
 ## Asks for RECORD_AUDIO when it's missing. Calls done(granted) once the
 ## user has answered (straight away when it's already granted).
@@ -83,6 +88,7 @@ func process() -> void:
 		var err: String = native.start_meteor_mic(host, port, String(offer["key"]), bool(offer.get("opus", false)))
 		if err.is_empty():
 			_running = true
+			_second = ""
 			_host = host
 			_port = port
 			_log_at = now
@@ -105,6 +111,16 @@ func process() -> void:
 		_retry_at = now + RETRY_SEC
 		return
 	_peak = maxf(_peak, float(status.get("level", 0.0)))
+	# Steam Frame: over the second link as well, while there is one and
+	# Stream Link isn't "Wi-Fi only" (main.side_channel_second_address()).
+	var second: String = main.side_channel_second_address() if main.has_method("side_channel_second_address") else ""
+	if second != _second and native.has_method("set_meteor_mic_second"):
+		var problem: String = native.set_meteor_mic_second(second)
+		_second = second
+		if not problem.is_empty():
+			main._log("[METEOR-MIC] Not over the second link: %s" % problem)
+		else:
+			main._log("[METEOR-MIC] %s" % ("Also over the second link" if not second.is_empty() else "Over the stream's own link only"))
 	if now - _log_at >= LOG_EVERY_SEC:
 		var packets := int(status.get("packets", 0))
 		main._log("[METEOR-MIC] %.0f packets/s, peak %.0f dBFS" % [
@@ -118,6 +134,7 @@ func _stop(reason: String) -> void:
 	if native:
 		native.stop_meteor_mic()
 	_running = false
+	_second = ""
 	main._log("[METEOR-MIC] Stopped (%s)" % reason)
 
 func _native():

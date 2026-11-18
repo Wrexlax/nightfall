@@ -19,6 +19,8 @@ var _tab_settings: Control
 var _tab_btn_display: Button
 var _tab_btn_stream: Button
 var _tab_btn_control: Button
+var _tab_btn_buttons: Button
+var _tab_buttons: Control
 var _tab_btn_monitors: Button
 var _tab_btn_ai3d: Button
 var _tab_btn_picture: Button
@@ -75,9 +77,13 @@ const PRESET_PRIMARY_COLOR := Color(0.55, 0.78, 1.0, 0.9)
 const PRESET_SECONDARY_COLOR := Color(1, 1, 1, 0.35)
 const TOOLTIP_META := &"nightfall_tooltip"
 const TOOLTIP_DELAY_SEC := 0.55
-const TOOLTIP_VIEWPORT_SIZE := Vector2i(1000, 64)
+# Two lines tall (fits the 102 px strip above the menu) so longer tips wrap
+# instead of being cut off.
+const TOOLTIP_VIEWPORT_SIZE := Vector2i(1160, 96)
 const SETTINGS_TAB := 6
 const PCVR_PAGE := 7 # Replacement page, deliberately not an ordinary tab.
+# Steam Frame's Buttons tab. It was 7 before upstream 0.9 took 7 for PCVR_PAGE.
+const BUTTONS_TAB := 8
 # Space under the menu's last row; the Settings page only needs to clear the
 # rounded corners, since it is already inset 24px from the sides.
 const MENU_BOTTOM_MARGIN_PX := 32
@@ -147,6 +153,11 @@ func _set_button_tooltip(button: Button, tooltip: String) -> Button:
 	# Suppress Godot's separate desktop tooltip; Nightfall renders one shared
 	# bar for both mouse and projected XR pointers.
 	button.tooltip_text = ""
+	# A button whose tooltip follows its setting (Quality on the Steam Frame)
+	# is pressed with the pointer on it: the bar showing its old tooltip is
+	# rewritten there and then, not when the pointer next comes back (7q).
+	if button == _tooltip_visible_target:
+		_show_tooltip(button)
 	return button
 
 func _build_tooltip_surface() -> void:
@@ -166,8 +177,15 @@ func _build_tooltip_surface() -> void:
 	_tooltip_label = Label.new()
 	_tooltip_label.add_theme_font_size_override("font_size", 24)
 	_tooltip_label.add_theme_color_override("font_color", Color(1, 1, 1, 0.45))
+	if main.get("device_is_steam_frame") == true:
+		# As solid as the menu itself: the faint bar was hard to read over a
+		# bright room or picture.
+		tooltip_style.bg_color = Color(0.06, 0.06, 0.10, 0.92)
+		_tooltip_label.add_theme_color_override("font_color", Color(1, 1, 1, 0.85))
 	_tooltip_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_tooltip_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_tooltip_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_tooltip_label.max_lines_visible = 2
 	_tooltip_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	_tooltip_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_tooltip_panel.add_child(_tooltip_label)
@@ -288,11 +306,12 @@ func update_stereo_shader():
 	update_option_btn(main._ui_3d_btn, main.settings_controller.get_depth_model_label())
 	if main._ui_3d_gpu_api_btn:
 		update_option_btn(main._ui_3d_gpu_api_btn, main.settings_controller.get_ai_3d_gpu_api_label())
-	update_option_btn(main._ui_3d_hz_cap_btn, "%dhz" % main.settings_controller.get_effective_hz_cap())
+	update_option_btn(main._ui_3d_hz_cap_btn, main.settings_controller.hz_cap_label())
 	# Separation/Convergence are never Auto-overridden (they stay live under
 	# Auto - see update_3d_btn_state()), so no Auto-aware branching needed.
 	update_option_btn(main._ui_3d_separation_btn, main.settings_controller.get_ai_3d_separation_label())
 	update_option_btn(main._ui_3d_convergence_btn, main.settings_controller.get_ai_3d_convergence_label())
+	main.settings_controller.refresh_ai_3d_sliders()
 	update_option_btn(main._ui_3d_cursor_position_btn, main.settings_controller.get_ai_3d_cursor_position_label())
 	update_option_btn(main._ui_3d_depth_sync_btn, "On" if main.settings.host.ai_3d_depth_sync else "Off")
 	update_option_btn(main._ui_3d_edge_alignment_btn, "On" if main.settings.host.ai_3d_edge_alignment else "Off")
@@ -304,10 +323,76 @@ func update_stereo_shader():
 			main.settings_controller.ai_3d_process_debug_labels[main.settings.host.ai_3d_process_debug])
 	update_3d_btn_state()
 
+var _last_3d_state_log := ""
+var _ai3d_toggle_btn: Button = null
+
+## Steam Frame: the note at the top of the AI 3D page, "" for none. Without
+## depth on the headset, AI 3D needs Meteor. With it: while Meteor is the
+## chosen depth and the headset's own model is doing the work instead,
+## because the PC's Meteor has its depth switched off (`through_meteor` and
+## not `offered`) or its maps have stopped arriving (`filling_in`).
+## Shown on the AI 3D page while the stream doesn't pass through Meteor at
+## all: the headset's own depth works, and nothing else would tell a new user
+## that Meteor's is sharper and lighter. A click on it hides it for good:
+## nobody wants that note forever.
+const METEOR_HINT := "For sharper 3D that is lighter on the headset, install Nightfall Meteor on your PC.\nUntil then the headset's own model is in use. Click this note to hide it for good."
+
+static func frame_ai3d_note(headset_depth: bool, streaming: bool, ai3d_on: bool, through_meteor: bool,
+		offered: bool, declined: bool, filling_in: bool, hint: bool = false) -> String:
+	if not headset_depth:
+		return "" if offered else "AI 3D on the Steam Frame uses Nightfall Meteor on your PC.\nStart Meteor on the PC, then reconnect."
+	if not streaming or not ai3d_on or declined:
+		return ""
+	if through_meteor and not offered:
+		return "Meteor on your PC has its depth switched off (its menu: Host depth). The headset's model is in use."
+	if filling_in:
+		return "Not receiving depth from Meteor on your PC. The headset's model is filling in until it returns."
+	if hint and not through_meteor:
+		return METEOR_HINT
+	return ""
+
+func refresh_ai3d_note() -> void:
+	var note = _tab_ai3d.get_node_or_null("Ai3dNotice") if _tab_ai3d else null
+	if note == null or main.get("device_is_steam_frame") != true:
+		return
+	var sc = main.settings_controller
+	var depth = main.get("depth_estimator")
+	var text := frame_ai3d_note(sc.frame_depth_available(), main.is_streaming, main.settings.host.ai_3d_speed != 0,
+		_through_meteor(), sc.meteor_depth_offered(), main.settings.host.ai_3d_meteor_declined,
+		depth != null and depth.has_method("headset_filling_in") and depth.headset_filling_in(),
+		not main.settings.frame_meteor_hint_hidden)
+	if not text.is_empty():
+		note.text = text
+	note.visible = not text.is_empty()
+	# Only the suggestion takes clicks: a button lies over it then. A click on
+	# anything in the menu that isn't a button moves the menu (8e's note took
+	# clicks itself and never got one: a click only moved the menu).
+	var over = note.get_node_or_null("Ai3dNoticeHide")
+	if over:
+		over.visible = text == METEOR_HINT
+
+func _on_ai3d_hint_pressed() -> void:
+	var note = _tab_ai3d.get_node_or_null("Ai3dNotice") if _tab_ai3d else null
+	if note == null or note.text != METEOR_HINT:
+		return
+	main.settings.frame_meteor_hint_hidden = true
+	main.state_manager.save_state()
+	main._log("[AI3D] the suggestion to install Meteor was hidden for good")
+	refresh_ai3d_note()
+
 func update_3d_btn_state():
 	# With several screens AI-3D still runs, on the primary only (see
 	# SettingsController.toggle_ai_3d_enabled()), so it stays adjustable.
 	var disabled = main.settings.host.sbs_mode > 0
+	if _ai3d_toggle_btn:
+		update_option_btn(_ai3d_toggle_btn, "On" if main.settings.host.ai_3d_speed != 0 else "Off")
+		_ai3d_toggle_btn.disabled = disabled
+	var state_log = "[AI3D] controls: speed=%d sbs_mode=%d screens=%d -> %s" % [
+		main.settings.host.ai_3d_speed, main.settings.host.sbs_mode, main.screens.size(),
+		"locked (SBS)" if disabled else ("off" if main.settings.host.ai_3d_speed == 0 else "on")]
+	if state_log != _last_3d_state_log:
+		_last_3d_state_log = state_log
+		main._log(state_log)
 	for enable_btn in [main._ui_3d_speed_btn, main._ui_3d_enable_btn]:
 		if enable_btn:
 			enable_btn.disabled = disabled
@@ -326,14 +411,22 @@ func update_3d_btn_state():
 	# Cap below, NOT additionally greyed under Auto, since it's the only
 	# control that can switch OUT of Auto.
 	var mode_disabled = disabled or main.settings.host.ai_3d_speed == 0 or locked
+	refresh_ai3d_note()
 	if main._ui_3d_mode_btn:
-		main._ui_3d_mode_btn.visible = not locked
+		# 3D Mode picks the on-headset depth tier; on the Frame Meteor does it.
+		main._ui_3d_mode_btn.visible = not locked and not main.device_is_steam_frame
 		main._ui_3d_mode_btn.disabled = mode_disabled
 		main._ui_3d_mode_btn.modulate.a = 0.3 if mode_disabled else 1.0
 	# Model and Hz Cap are meaningless whenever AI-3D is off or Auto is
 	# choosing them. Android's platform lock applies only to Model: Standard is
 	# enforced there, but its explicit Hz Cap remains user-adjustable.
 	var model_disabled = disabled or main.settings.host.ai_3d_speed == 0 or (OS.get_name() != "Android" and main.settings.host.ai_3d_speed == 1)
+	if main.settings_controller.frame_depth_available():
+		# The Frame has no Auto tier: Model always picks between Meteor and
+		# the headset's own models. Its text follows whichever is in force
+		# (Meteor comes and goes with the PC).
+		model_disabled = disabled or main.settings.host.ai_3d_speed == 0
+		update_option_btn(main._ui_3d_btn, main.settings_controller.get_depth_model_label())
 	var hz_disabled = disabled or main.settings.host.ai_3d_speed == 0 or main.settings.host.ai_3d_speed == 1
 	# Type is NOT included above (2026-08-30) - Auto was always meant to let
 	# you pick GPU or CPU yourself (GPU as the default), not force GPU
@@ -344,7 +437,9 @@ func update_3d_btn_state():
 	# GPU.
 	var type_disabled = disabled or main.settings.host.ai_3d_speed == 0 or locked
 	if main._ui_3d_type_btn:
-		main._ui_3d_type_btn.visible = not locked
+		# Steam Frame: on-headset depth isn't available yet (Meteor makes the
+		# depth on the PC), so the headset-only depth options are hidden.
+		main._ui_3d_type_btn.visible = not locked and not main.device_is_steam_frame
 		main._ui_3d_type_btn.disabled = type_disabled
 		main._ui_3d_type_btn.modulate.a = 0.3 if type_disabled else 1.0
 	if main._ui_3d_btn:
@@ -358,8 +453,17 @@ func update_3d_btn_state():
 	if main._ui_3d_priority_btn:
 		var priority_disabled = disabled or main.settings.host.ai_3d_speed == 0 or main.settings_controller.get_depth_backend_index() != 2 or not main.settings_controller.depth_gpu_priority_available() or (OS.get_name() == "Android" and main.settings_controller.get_ai_3d_gpu_api_effective() != 0)
 		main._ui_3d_priority_btn.disabled = priority_disabled
+		if main.device_is_steam_frame:
+			main._ui_3d_priority_btn.visible = false
 		main._ui_3d_priority_btn.modulate.a = 0.3 if priority_disabled else 1.0
 	if main._ui_3d_hz_cap_btn:
+		# Steam Frame: this caps the depth model on the headset, so it shows
+		# only while that is the one in use. With Meteor the PC's rate is set
+		# in Meteor's own menu (Rate).
+		var headset_depth: bool = main.settings_controller.frame_depth_available() and not main.settings_controller.meteor_depth_selected()
+		main._ui_3d_hz_cap_btn.visible = not main.device_is_steam_frame or headset_depth
+		if headset_depth:
+			hz_disabled = disabled or main.settings.host.ai_3d_speed == 0
 		main._ui_3d_hz_cap_btn.disabled = hz_disabled
 		main._ui_3d_hz_cap_btn.modulate.a = 0.3 if hz_disabled else 1.0
 	# Separation/Convergence/Cursor Position stay live under Auto - they're
@@ -459,6 +563,136 @@ func on_licences_pressed():
 		_reveal_licences.call_deferred()
 	_cull_settings_page.call_deferred()
 
+# Voice Commands opens a list of every command beneath its row, built on
+# first use.
+var _voice_list: VBoxContainer = null
+var _voice_list_language := ""
+
+func on_voice_commands_pressed():
+	if not _settings_scroll:
+		return
+	# The list is in the menu's language: made again after that has changed.
+	if _voice_list and _voice_list_language != Localization.current():
+		var was_open := _voice_list.visible
+		_voice_list.get_parent().remove_child(_voice_list)
+		_voice_list.queue_free()
+		_voice_list = null
+		_build_voice_list(_settings_scroll.get_child(0))
+		_voice_list.visible = not was_open
+	if not _voice_list:
+		_build_voice_list(_settings_scroll.get_child(0))
+	_voice_list.visible = not _voice_list.visible
+	if _voice_list.visible:
+		refresh_voice_commands()
+		_reveal_voice_list.call_deferred()
+	_cull_settings_page.call_deferred()
+
+func _reveal_voice_list():
+	if _settings_scroll and _voice_list:
+		_settings_scroll.ensure_control_visible(_voice_list.get_child(1))
+
+func refresh_voice_commands():
+	if not _voice_list:
+		return
+	var note := _voice_list.get_node("VoiceNote") as Label
+	var pack := VoicePacks.current()
+	if not pack.is_empty():
+		var words: Dictionary = pack["list"]
+		note.text = String(words.get("note_off", "")) if not main.settings.voice_commands else \
+			String(words.get("note_prefix" if main.settings.voice_require_prefix else "note", ""))
+		return
+	if not main.settings.voice_commands:
+		note.text = "Voice commands are off (Commands: Off, above): everything you say is typed."
+		return
+	note.text = ("Start every command with \"Nightfall\" (Require 'Nightfall' is on), e.g. \"Nightfall select all\"." \
+		if main.settings.voice_require_prefix else \
+		"Hold your voice button and say a command on its own. Saying \"Nightfall\" first also works.") \
+		+ " The name alone switches an on/off setting: \"depth view\", \"passthrough\", \"gamepad mode\"."
+
+## The Voice Commands list: [[title, [[say, what it does]]]]. In English,
+## every hand-written command and the menu rule; in another language, what
+## its pack holds, with the menu rule shown on the menu's own names.
+static func voice_list_sections(pack: Dictionary) -> Array:
+	if pack.is_empty():
+		var sections: Array = []
+		for g in VoiceCommands.GROUPS:
+			var rows: Array = []
+			for e in g[1]:
+				rows.append([e[2], e[3]])
+			sections.append([g[0], rows])
+		sections.append(["Any other menu button", VoiceMenu.HELP])
+		sections.append(["While typing", VoiceCommands.TYPING_HELP])
+		return sections
+	var help: Array = pack["help"]
+	var off := String(pack["off"][0]) if not pack["off"].is_empty() else "off"
+	var next := String(pack["next"][0]) if not pack["next"].is_empty() else "next"
+	return VoicePacks.list_sections(pack, [
+		["%s %s" % [Localization.t("Bezel").to_lower(), off], help[0]],
+		["%s %s" % [next, Localization.t("Codec").to_lower()], help[1]],
+		[Localization.t("Reconnect Stream").to_lower(), help[2]],
+	])
+
+static func _voice_label(text: String, size: int, color: Color, width: float = 0.0) -> Label:
+	var l := Label.new()
+	l.text = text
+	l.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
+	l.add_theme_font_size_override("font_size", size)
+	l.add_theme_color_override("font_color", color)
+	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	if width > 0.0:
+		l.custom_minimum_size = Vector2(width, 0)
+	return l
+
+## The Voice Commands list is two pairs of columns side by side: a command
+## and what it does, twice. Each cell keeps to its width and wraps; without
+## that a long line widened its whole column and pushed the right-hand one
+## off the page ("Load one of your sa", 2026-11-17). Four cells and three
+## gaps of 18 come to 1314 of the page's 1352.
+const VOICE_LIST_COMMAND_WIDTH := 270.0
+const VOICE_LIST_NOTE_WIDTH := 360.0
+
+static func _voice_cell(text: String, size: int, color: Color, width: float) -> Label:
+	var cell := _voice_label(text, size, color, width)
+	cell.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	cell.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	cell.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	return cell
+
+func _build_voice_list(content: Control) -> void:
+	var row := content.find_child("SettingsVoiceRow", false, false)
+	_voice_list = VBoxContainer.new()
+	_voice_list.name = "VoiceCommandsList"
+	_voice_list.add_theme_constant_override("separation", 6)
+	_voice_list.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_voice_list.visible = false
+	var gap := Control.new()
+	gap.custom_minimum_size = Vector2(0, 4)
+	gap.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_voice_list.add_child(gap)
+	var note := _voice_label("", 18, Color(1, 1, 1, 0.75))
+	note.name = "VoiceNote"
+	note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	note.custom_minimum_size = Vector2(1200, 0)
+	note.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	_voice_list.add_child(note)
+	_voice_list_language = Localization.current()
+	var sections := voice_list_sections(VoicePacks.current())
+	for sec in sections:
+		_voice_list.add_child(_voice_label(sec[0], 20, Color(0.55, 0.78, 1.0, 1.0)))
+		var grid := GridContainer.new()
+		grid.columns = 4
+		grid.add_theme_constant_override("h_separation", 18)
+		grid.add_theme_constant_override("v_separation", 4)
+		grid.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+		grid.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		for r in sec[1]:
+			grid.add_child(_voice_cell("\"%s\"" % r[0], 17, Color(1, 1, 1, 0.95), VOICE_LIST_COMMAND_WIDTH))
+			grid.add_child(_voice_cell(r[1], 16, Color(1, 1, 1, 0.55), VOICE_LIST_NOTE_WIDTH))
+		_voice_list.add_child(grid)
+	content.add_child(_voice_list)
+	if row:
+		content.move_child(_voice_list, row.get_index() + 1)
+
 func _reveal_licences():
 	if _settings_scroll and _licences:
 		_settings_scroll.ensure_control_visible(_licences.get_child(1))
@@ -482,7 +716,7 @@ func _build_licences(content: Control) -> void:
 	grid.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	grid.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_licences.add_child(grid)
-	var names := Licences.names()
+	var names := Licences.names(main.device_is_steam_frame)
 	for i in names.size():
 		var button := make_action_btn(names[i])
 		button.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
@@ -540,7 +774,7 @@ func _build_licences(content: Control) -> void:
 
 func _show_licence(index: int) -> void:
 	_licence_index = index
-	_licence_lines = Licences.lines(index)
+	_licence_lines = Licences.lines(index, main.device_is_steam_frame)
 	_licence_page = 0
 	var grid := _licences.get_node("LicenceGrid")
 	for i in grid.get_child_count():
@@ -559,7 +793,7 @@ func _render_licence_page() -> void:
 	var pages := maxi(ceili(_licence_lines.size() / float(LICENCE_PAGE_LINES)), 1)
 	var nav := _licences.get_node("LicencePager")
 	nav.visible = true
-	nav.get_node("Page").text = "%s  %d / %d" % [Licences.names()[_licence_index], _licence_page + 1, pages]
+	nav.get_node("Page").text = "%s  %d / %d" % [Licences.names(main.device_is_steam_frame)[_licence_index], _licence_page + 1, pages]
 	nav.get_child(0).disabled = _licence_page == 0
 	nav.get_child(2).disabled = _licence_page >= pages - 1
 	var text := _licences.get_node("LicenceText")
@@ -643,6 +877,11 @@ func update_ambient_btn_state():
 		main._ui_ambient_color_btn.disabled = color_disabled
 		main._ui_ambient_color_btn.modulate.a = 0.3 if color_disabled else 1.0
 
+## Steam Frame, Screens tab: shown while the PC's host gives Nightfall no list
+## of monitors to choose from (Sunshine and most others).
+const SCREENS_HOST_NOTICE := "Using additional screens requires Meteor's built-in streaming host.\nPlease connect to the appropriate host."
+var _screens_host_notice: Label = null
+
 func _build_screen_sources(parent: VBoxContainer) -> void:
 	_screen_source_status = Label.new()
 	_screen_source_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -676,6 +915,24 @@ func _build_screen_sources(parent: VBoxContainer) -> void:
 		main.state_manager.save_state()
 		update_screen_sources())
 	row.add_child(_browser_resolution_btn)
+	# Steam Frame: no in-headset browser, so this row (what Screen 1 shows,
+	# and the browser's buttons) has nothing to offer. In its place: why the
+	# controls below are greyed out when the PC's host can't do this.
+	row.visible = not MenuSchema._IS_FRAME
+	if MenuSchema._IS_FRAME:
+		_screens_host_notice = Label.new()
+		_screens_host_notice.name = "ScreensHostNotice"
+		_screens_host_notice.text = SCREENS_HOST_NOTICE
+		_screens_host_notice.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		_screens_host_notice.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		_screens_host_notice.add_theme_font_size_override("font_size", 24)
+		# The colour the menu's other notices use (AI 3D's), so it reads as one.
+		_screens_host_notice.add_theme_color_override("font_color", Color(0.55, 0.75, 1.0))
+		_screens_host_notice.custom_minimum_size = Vector2(1300, 70)
+		_screens_host_notice.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+		_screens_host_notice.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_screens_host_notice.visible = false
+		parent.add_child(_screens_host_notice)
 	update_screen_sources()
 
 func update_screen_sources() -> void:
@@ -714,6 +971,10 @@ func update_monitor_tab():
 	# non-Polaris multi-monitor selection is supported.
 	var polaris = main.settings.host.is_polaris_host
 	var vdd = main.settings.host.virtual_display_installed
+	if _screens_host_notice and _screens_host_notice.visible == polaris:
+		_screens_host_notice.visible = not polaris
+		main._log("[SCREENS] the host %s; the note about the built-in host is %s" % [
+			"offers its monitors" if polaris else "offers no monitors to choose from", "hidden" if polaris else "shown"])
 	main._ui_monitors_btn.disabled = not polaris
 	main._ui_virtual_monitors_btn.disabled = not polaris or not vdd
 	main._ui_apply_preset_btn.disabled = not polaris
@@ -1034,6 +1295,7 @@ func switch_tab(tab: int):
 	_tab_display.visible = (tab == 0)
 	_tab_stream.visible = (tab == 1)
 	if _tab_control: _tab_control.visible = (tab == 2)
+	if _tab_buttons: _tab_buttons.visible = (tab == BUTTONS_TAB)
 	if _tab_monitors: _tab_monitors.visible = (tab == 5)
 	if _tab_ai3d: _tab_ai3d.visible = (tab == 3)
 	if _tab_picture: _tab_picture.visible = (tab == 4)
@@ -1060,6 +1322,10 @@ func switch_tab(tab: int):
 		_tab_btn_control.add_theme_stylebox_override("normal", tab_active_style if tab == 2 else tab_inactive_style)
 		_tab_btn_control.add_theme_stylebox_override("hover", tab_active_style)
 		_tab_btn_control.add_theme_color_override("font_color", Color(1, 1, 1, 1.0) if tab == 2 else Color(1, 1, 1, 0.5))
+	if _tab_btn_buttons:
+		_tab_btn_buttons.add_theme_stylebox_override("normal", tab_active_style if tab == BUTTONS_TAB else tab_inactive_style)
+		_tab_btn_buttons.add_theme_stylebox_override("hover", tab_active_style)
+		_tab_btn_buttons.add_theme_color_override("font_color", Color(1, 1, 1, 1.0) if tab == BUTTONS_TAB else Color(1, 1, 1, 0.5))
 	if _tab_btn_monitors:
 		_tab_btn_monitors.add_theme_stylebox_override("normal", tab_active_style if tab == 5 else tab_inactive_style)
 		_tab_btn_monitors.add_theme_stylebox_override("hover", tab_active_style)
@@ -1072,6 +1338,12 @@ func switch_tab(tab: int):
 		_tab_btn_picture.add_theme_stylebox_override("normal", tab_active_style if tab == 4 else tab_inactive_style)
 		_tab_btn_picture.add_theme_stylebox_override("hover", tab_active_style)
 		_tab_btn_picture.add_theme_color_override("font_color", Color(1, 1, 1, 1.0) if tab == 4 else Color(1, 1, 1, 0.5))
+	# Every state uses the same margins, so pressing or hovering a tab never
+	# changes its size (which pushed the whole menu down a little).
+	for b in [_tab_btn_display, _tab_btn_stream, _tab_btn_control, _tab_btn_buttons, _tab_btn_monitors, _tab_btn_ai3d, _tab_btn_picture]:
+		if b:
+			for state in ["pressed", "hover_pressed", "disabled", "focus"]:
+				b.add_theme_stylebox_override(state, tab_active_style if state != "disabled" else tab_inactive_style)
 	if _settings_gear_btn:
 		# The gear stands in for the Settings tab button, so it carries the
 		# active-tab highlight instead.
@@ -1085,12 +1357,18 @@ func switch_tab(tab: int):
 			node.visible = tab not in [SETTINGS_TAB, PCVR_PAGE]
 	if _brand_label:
 		_brand_label.text = "PCVR Settings" if tab == PCVR_PAGE else ("Advanced Settings" if tab == SETTINGS_TAB else "Nightfall")
+		update_brand_label.call_deferred()
 	if _bottom_margin:
 		_bottom_margin.custom_minimum_size.y = SETTINGS_BOTTOM_MARGIN_PX if tab == SETTINGS_TAB else MENU_BOTTOM_MARGIN_PX
 	_tab_btn_display.add_theme_color_override("font_color", Color(1, 1, 1, 1.0) if tab == 0 else Color(1, 1, 1, 0.5))
 	_tab_btn_stream.add_theme_color_override("font_color", Color(1, 1, 1, 1.0) if tab == 1 else Color(1, 1, 1, 0.5))
+	_tint_stream_tab()
+	_refresh_status_line()
 
+	refresh_link_tip()
 	if tab == 5:
+		# What is live, not what was staged in an earlier visit or app run.
+		main.settings_controller.sync_staged_from_current_layout()
 		update_screen_sources()
 		update_monitor_tab()
 
@@ -1272,6 +1550,33 @@ func build_ui():
 	right_spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	top_row.add_child(right_spacer)
 
+	# Steam Frame: shown only while the stream's sound is muted (Stream >
+	# Volume), so nobody sits in silence wondering why. Pressing it unmutes.
+	_mute_btn = Button.new()
+	_mute_btn.name = "MutedButton"
+	_mute_btn.text = "Muted"
+	_set_button_tooltip(_mute_btn, "The stream's sound is muted in Nightfall. Press to unmute.")
+	_mute_btn.focus_mode = Control.FOCUS_NONE
+	_mute_btn.custom_minimum_size = Vector2(110, 36)
+	_mute_btn.add_theme_font_size_override("font_size", 22)
+	_mute_btn.add_theme_color_override("font_color", MUTED_COLOR)
+	_mute_btn.add_theme_color_override("font_hover_color", Color(1.0, 0.6, 0.55, 1.0))
+	# While shown it is the left end of the Exit / Disconnect group, so it
+	# takes the group's rounded lower-left corner and sits flush against Exit
+	# (see _shape_exit_corner()).
+	var mute_style = main._btn_style.duplicate()
+	mute_style.content_margin_left = 14
+	mute_style.content_margin_right = 12
+	mute_style.content_margin_top = 2
+	mute_style.content_margin_bottom = 2
+	mute_style.set_corner_radius_all(0)
+	mute_style.set_corner_radius(CORNER_BOTTOM_LEFT, 32)
+	for state in ["normal", "hover", "pressed"]:
+		_mute_btn.add_theme_stylebox_override(state, mute_style)
+	_mute_btn.visible = false
+	_mute_btn.button_down.connect(func(): main.settings_controller.step_volume("mute"))
+	top_row.add_child(_mute_btn)
+
 	main._ui_exit_btn = Button.new()
 	main._ui_exit_btn.text = "Exit"
 	_set_button_tooltip(main._ui_exit_btn, "Close Nightfall.")
@@ -1297,6 +1602,7 @@ func build_ui():
 	main._ui_exit_btn.add_theme_stylebox_override("normal", exit_style)
 	main._ui_exit_btn.add_theme_stylebox_override("hover", exit_hover)
 	main._ui_exit_btn.add_theme_stylebox_override("pressed", exit_hover)
+	_exit_styles = [exit_style, exit_hover]
 	top_row.add_child(main._ui_exit_btn)
 
 	main._ui_disconnect_btn = Button.new()
@@ -1378,6 +1684,17 @@ func build_ui():
 	_tab_display = _build_menu_tab(vbox, MenuSchema.get_tab(&"display"))
 	_tab_stream = _build_menu_tab(vbox, MenuSchema.get_tab(&"stream"))
 	_tab_control = _build_menu_tab(vbox, MenuSchema.get_tab(&"control"))
+	if main.button_bindings:
+		_tab_buttons = VBoxContainer.new()
+		_tab_buttons.name = "TabButtons"
+		_tab_buttons.add_theme_constant_override("separation", 0)
+		_tab_buttons.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_tab_buttons.visible = false
+		vbox.add_child(_tab_buttons)
+		# No top margin: the first row sits where the other tabs' rows do, and
+		# two rows fit without a scrollbar (pages with more rows still scroll).
+		var page := _build_scroll_page(_tab_buttons, 0)
+		_build_button_binding_rows(page)
 
 	_tab_ai3d = VBoxContainer.new()
 	_tab_ai3d.name = "TabAi3d"
@@ -1385,6 +1702,31 @@ func build_ui():
 	_tab_ai3d.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_tab_ai3d.visible = false
 	vbox.add_child(_tab_ai3d)
+	# Steam Frame: AI 3D needs Nightfall Meteor on the PC; say so instead of
+	# only greying everything out.
+	var ai3d_notice := Label.new()
+	ai3d_notice.name = "Ai3dNotice"
+	ai3d_notice.text = "AI 3D on the Steam Frame uses Nightfall Meteor on your PC.\nStart Meteor on the PC, then reconnect."
+	ai3d_notice.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	ai3d_notice.add_theme_font_size_override("font_size", 24)
+	ai3d_notice.add_theme_color_override("font_color", Color(0.55, 0.75, 1.0))
+	# One of its texts is a single long line (refresh_ai3d_note()).
+	ai3d_notice.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	ai3d_notice.custom_minimum_size = Vector2(1300, 0)
+	ai3d_notice.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	ai3d_notice.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	ai3d_notice.visible = false
+	# The suggestion to install Meteor is hidden by clicking it; this is what
+	# takes that click (see refresh_ai3d_note()).
+	var hide_hint := Button.new()
+	hide_hint.name = "Ai3dNoticeHide"
+	hide_hint.flat = true
+	hide_hint.focus_mode = Control.FOCUS_NONE
+	hide_hint.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	hide_hint.visible = false
+	hide_hint.pressed.connect(_on_ai3d_hint_pressed)
+	ai3d_notice.add_child(hide_hint)
+	_tab_ai3d.add_child(ai3d_notice)
 
 	var ai3d_row1 = HBoxContainer.new()
 	ai3d_row1.name = "Ai3dRow1"
@@ -1396,7 +1738,7 @@ func build_ui():
 	_tab_ai3d.add_child(ai3d_row1)
 
 	main._ui_3d_mode_btn = make_option_btn("3D Mode", "Auto")
-	_set_button_tooltip(main._ui_3d_mode_btn, "Choose the AI 3D performance mode.")
+	_set_button_tooltip(main._ui_3d_mode_btn, "How hard the headset works on AI depth: Auto picks for you, Fast is lighter and smoother, Standard gives better depth but costs more.")
 	# Hidden on Android (updated for real by update_3d_btn_state(), which
 	# also runs during this same init - set here too so there's no
 	# one-frame flash before that first fires, matching 3D Debug's own
@@ -1405,12 +1747,20 @@ func build_ui():
 	ai3d_row1.visible = not ai3d_options_locked
 	main._ui_3d_mode_btn.visible = not ai3d_options_locked
 	ai3d_row1.add_child(main._ui_3d_mode_btn)
+	# (The Steam Frame port had its own AI 3D on/off switch in this row. Upstream
+	# 0.9 added the same switch to the row below (_ui_3d_enable_btn), so that
+	# one is used on every device and _ai3d_toggle_btn stays unset.)
 	main._ui_3d_type_btn = make_option_btn("Type", "GPU")
-	_set_button_tooltip(main._ui_3d_type_btn, "Choose whether depth inference runs on the CPU or GPU.")
+	_set_button_tooltip(main._ui_3d_type_btn, "For depth made on the headset: run the AI model on the headset's CPU, or on its graphics chip (GPU, via Vulkan). Not used when Nightfall Meteor makes the depth on your PC.")
 	main._ui_3d_type_btn.visible = not ai3d_options_locked
 	ai3d_row1.add_child(main._ui_3d_type_btn)
 	main._ui_3d_btn = make_option_btn("Quality", main.settings_controller.ai_3d_models[0].label)
-	_set_button_tooltip(main._ui_3d_btn, "Choose an automatic, production, or experimental AI depth quality.")
+	if main.device_is_steam_frame:
+		# Replaced by the tooltip for the choice showing as soon as the label
+		# is set (update_option_btn).
+		_set_button_tooltip(main._ui_3d_btn, frame_depth_quality_tip(""))
+	else:
+		_set_button_tooltip(main._ui_3d_btn, "Choose an automatic, production, or experimental AI depth quality.")
 	main._ui_3d_btn.visible = not ai3d_options_locked
 	ai3d_row1.add_child(main._ui_3d_btn)
 	if OS.get_name() == "Android":
@@ -1418,7 +1768,7 @@ func build_ui():
 		_set_button_tooltip(main._ui_3d_gpu_api_btn, "Choose OpenCL, OpenGL, or CPU (frees the GPU entirely). Auto selects the backend for you.")
 		ai3d_row1.add_child(main._ui_3d_gpu_api_btn)
 	main._ui_3d_priority_btn = make_option_btn("GPU Priority", main.settings_controller.ai_3d_gpu_priority_labels[main.settings.ai_3d_gpu_priority])
-	_set_button_tooltip(main._ui_3d_priority_btn, "Choose whether streaming or depth inference receives GPU priority.")
+	_set_button_tooltip(main._ui_3d_priority_btn, "For depth made on the headset: choose whether the headset's graphics chip favours the video stream or the AI depth model.")
 	if not ai3d_options_locked:
 		ai3d_row1.add_child(main._ui_3d_priority_btn)
 	var ai3d_gap1 = Control.new()
@@ -1443,15 +1793,23 @@ func build_ui():
 	_set_button_tooltip(main._ui_3d_enable_btn, "Convert normal video into stereoscopic 3D using local depth inference.")
 	ai3d_row2.add_child(main._ui_3d_enable_btn)
 	main._ui_3d_hz_cap_btn = make_option_btn("Hz Cap", "20hz")
-	_set_button_tooltip(main._ui_3d_hz_cap_btn, "Limit how often the depth model runs each second.")
+	_set_button_tooltip(main._ui_3d_hz_cap_btn, FRAME_DEPTH_RATE_TIP if main.settings_controller.frame_depth_available()
+		else "Limit how often the depth model runs each second.")
 	ai3d_row2.add_child(main._ui_3d_hz_cap_btn)
 	main._ui_3d_separation_btn = make_option_btn("Separation", "75% (Default)")
 	_set_button_tooltip(main._ui_3d_separation_btn, "Adjust the perceived strength of the stereoscopic depth.")
 	ai3d_row2.add_child(main._ui_3d_separation_btn)
 	main._ui_3d_convergence_btn = make_option_btn("Convergence", "50% (Default)")
-	_set_button_tooltip(main._ui_3d_convergence_btn, "Adjust the depth plane where the left and right views meet.")
+	_set_button_tooltip(main._ui_3d_convergence_btn, "Which depth sits right on the screen. Lower: more of the picture pops out toward you. Higher: more of it sits behind the screen.")
 	ai3d_row2.add_child(main._ui_3d_convergence_btn)
-	if OS.get_name() == "Android":
+	if main.device_is_steam_frame:
+		# Sliders with a wider range (Separation 25-400%, Convergence 0-100%),
+		# and tooltips that fit the bar's two lines.
+		make_slider_btn(main._ui_3d_separation_btn, MenuSchema.TARGET_SETTINGS, &"set_ai_3d_separation", SettingsController.AI3D_SEPARATION_SLIDER_STEPS, 13)
+		_set_button_tooltip(main._ui_3d_separation_btn, "How strong the 3D is. Default 75%.\nHigher pushes near and far further apart, but edges stretch more.")
+		make_slider_btn(main._ui_3d_convergence_btn, MenuSchema.TARGET_SETTINGS, &"set_ai_3d_convergence", 20, 50)
+		_set_button_tooltip(main._ui_3d_convergence_btn, "Sets which part of the picture sits on the screen's surface. Default 50%.\nLower: more comes out toward you. Higher: more sinks in behind the screen.")
+	if OS.get_name() == "Android" or main.device_is_steam_frame:
 		main._ui_3d_depth_view_btn = make_option_btn("Depth View", "Off")
 		_set_button_tooltip(main._ui_3d_depth_view_btn,
 			"Show the final depth map used by AI 3D.")
@@ -1506,12 +1864,13 @@ func build_ui():
 	_set_button_tooltip(main._ui_monitors_btn, "Choose how many physical host monitors are displayed.")
 	mon_row1.add_child(main._ui_monitors_btn)
 	main._ui_virtual_monitors_btn = make_compact_option_btn("Virtual", "0")
-	_set_button_tooltip(main._ui_virtual_monitors_btn, "Choose how many virtual monitors are created.")
+	_set_button_tooltip(main._ui_virtual_monitors_btn, "How many virtual monitors to add. Windows decides where a new one sits on its desktop:\narrange it once in Windows' Display settings and it is remembered.")
 	mon_row1.add_child(main._ui_virtual_monitors_btn)
 	_browser_screens_btn = make_compact_option_btn("Browsers", "0")
 	_browser_screens_btn.disabled = true
 	_set_button_tooltip(_browser_screens_btn, "Open browser screens. Add or close browser screens using their screen menus.")
 	mon_row1.add_child(_browser_screens_btn)
+	_browser_screens_btn.visible = not MenuSchema._IS_FRAME
 
 	var mon_gap1 = Control.new()
 	mon_gap1.custom_minimum_size = Vector2(0, 10)
@@ -1551,7 +1910,7 @@ func build_ui():
 	_set_button_tooltip(main._ui_remove_preset_btn, "Delete the selected custom preset.")
 	mon_actions_row1.add_child(main._ui_remove_preset_btn)
 	main._ui_grid_mode_btn = make_compact_option_btn("Grid Mode", "On")
-	_set_button_tooltip(main._ui_grid_mode_btn, "Arrange screens using the monitor grid.")
+	_set_button_tooltip(main._ui_grid_mode_btn, "On: the screens sit in a grid and move as one. Off: each screen can be grabbed and placed on\nits own, and moving the main screen still brings the others along.")
 	mon_actions_row1.add_child(main._ui_grid_mode_btn)
 
 	_tab_settings = _build_menu_tab(vbox, MenuSchema.get_tab(&"settings"))
@@ -1720,8 +2079,10 @@ func build_ui():
 		main._ui_3d_gpu_api_btn.button_down.connect(func(): on_ai_3d_gpu_api_toggled())
 	main._ui_3d_enable_btn.button_down.connect(func(): on_ai_3d_speed_toggled())
 	main._ui_3d_hz_cap_btn.button_down.connect(func(): on_ai_3d_hz_cap_toggled())
-	main._ui_3d_separation_btn.button_down.connect(func(): on_ai_3d_separation_toggled())
-	main._ui_3d_convergence_btn.button_down.connect(func(): on_ai_3d_convergence_toggled())
+	if not main._ui_3d_separation_btn.has_meta("slider"):
+		main._ui_3d_separation_btn.button_down.connect(func(): on_ai_3d_separation_toggled())
+	if not main._ui_3d_convergence_btn.has_meta("slider"):
+		main._ui_3d_convergence_btn.button_down.connect(func(): on_ai_3d_convergence_toggled())
 	if main._ui_3d_depth_view_btn:
 		main._ui_3d_depth_view_btn.button_down.connect(func(): on_ai_3d_depth_view_toggled())
 	if main._ui_3d_debug_btn and OS.get_name() == "Android":
@@ -1797,6 +2158,445 @@ func _build_xr_workspace_probe(content: VBoxContainer) -> void:
 		status.text = control.message if not control.message.is_empty() else "Fixed demo; desktop returns on exit"
 	control.changed.connect(update)
 	update.call()
+# Steam Frame controller bindings: a small step-by-step menu inside the Control
+# tab - controller -> button -> category -> action, with Back at every step.
+var _bind_box: VBoxContainer
+
+func _build_button_binding_rows(content: VBoxContainer) -> void:
+	_bind_box = VBoxContainer.new()
+	_bind_box.name = "BindingsMenu"
+	_bind_box.add_theme_constant_override("separation", 12)
+	_bind_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	content.add_child(_bind_box)
+	_bind_show("root")
+
+func _bind_row() -> HBoxContainer:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 12)
+	row.alignment = BoxContainer.ALIGNMENT_CENTER
+	row.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_bind_box.add_child(row)
+	return row
+
+func _bind_btn(row: BoxContainer, label: String, value: String, tip: String, action: Callable) -> Button:
+	var b := make_option_btn(label, value)
+	_set_button_tooltip(b, tip)
+	row.add_child(b)
+	_make_scroll_friendly(b)
+	# Deferred: most binding actions rebuild the page, and freeing the button
+	# that is mid-click confuses the menu's input handling.
+	b.pressed.connect(func():
+		if not _scroll_dragged:
+			action.call_deferred())
+	return b
+
+func _bind_grid(items: Array, mapping: bool = false) -> void:
+	# items: [[label, value, tip, Callable], ...] laid out five to a row (the
+	# Frame's wider menu).
+	# mapping: draw as "physical control (small, grey) -> what it does (big, blue)".
+	var row: HBoxContainer = null
+	for i in items.size():
+		if i % 5 == 0:
+			row = _bind_row()
+		var it: Array = items[i]
+		if mapping:
+			_bind_map_btn(row, it[0], it[1], it[2], it[3])
+		else:
+			_bind_btn(row, it[0], it[1], it[2], it[3])
+
+# A mapping button: the controller button on top in small grey capitals, and
+# what it does underneath, larger and blue, so input and output can't be mixed up.
+func _bind_map_btn(row: BoxContainer, input: String, output: String, tip: String, action: Callable) -> Button:
+	var b := make_option_btn("", "")
+	b.text = ""
+	_set_button_tooltip(b, tip)
+	var box := VBoxContainer.new()
+	box.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	box.alignment = BoxContainer.ALIGNMENT_CENTER
+	box.add_theme_constant_override("separation", 4)
+	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var top := Label.new()
+	top.text = input.to_upper()
+	top.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	top.add_theme_font_size_override("font_size", 19)
+	top.add_theme_color_override("font_color", Color(1, 1, 1, 0.55))
+	top.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var bottom := Label.new()
+	bottom.text = output
+	bottom.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	bottom.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	bottom.add_theme_font_size_override("font_size", 28)
+	bottom.add_theme_color_override("font_color", Color(0.55, 0.8, 1.0, 1))
+	bottom.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	box.add_child(top)
+	box.add_child(bottom)
+	b.add_child(box)
+	row.add_child(b)
+	_make_scroll_friendly(b)
+	b.pressed.connect(func():
+		if not _scroll_dragged:
+			action.call_deferred())
+	return b
+
+func _bind_header(text: String) -> Label:
+	var l := Label.new()
+	l.text = text
+	l.add_theme_font_size_override("font_size", 26)
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_bind_box.add_child(l)
+	return l
+
+var _profile_name_text := ""
+# Page to return to after naming a profile (Reset All's "Save Profile First").
+var _after_profile_save := ""
+
+func _take_after_save() -> String:
+	var page := _after_profile_save if _after_profile_save != "" else "profiles"
+	_after_profile_save = ""
+	return page
+var _name_label: Label = null
+
+# Typing updates the name in place instead of rebuilding the page: rebuilding
+# freed the key that was being clicked, which left the menu half-responsive
+# (tabs needed several clicks). Shift/Clear still rebuild, but deferred.
+func _name_refresh() -> void:
+	if is_instance_valid(_name_label):
+		_name_label.text = "Name: " + _profile_name_text + "_"
+var _name_shift := true
+
+# A small on-menu keyboard for naming profiles.
+func _bind_name_keys(parent: Container, edit_keys: Container) -> void:
+	var bb = main.button_bindings
+	var rows := ["1234567890", "QWERTYUIOP", "ASDFGHJKL-", "ZXCVBNM_"]
+	for keys in rows:
+		var grid := HBoxContainer.new()
+		grid.add_theme_constant_override("separation", 6)
+		grid.alignment = BoxContainer.ALIGNMENT_CENTER
+		grid.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		parent.add_child(grid)
+		for ch in keys:
+			var label: String = ch if _name_shift else ch.to_lower()
+			grid.add_child(_name_key(label, func():
+				if _profile_name_text.length() < bb.PROFILE_NAME_MAX:
+					_profile_name_text += label
+				_name_refresh()
+				if _name_shift:
+					_name_shift = false
+					_bind_show.call_deferred("name")))
+	edit_keys.add_child(_name_key("Shift", func():
+		_name_shift = not _name_shift
+		_bind_show.call_deferred("name"), 120))
+	edit_keys.add_child(_name_key("Space", func():
+		if _profile_name_text.length() < bb.PROFILE_NAME_MAX:
+			_profile_name_text += " "
+		_name_refresh(), 120))
+	edit_keys.add_child(_name_key("Del", func():
+		_profile_name_text = _profile_name_text.left(maxi(0, _profile_name_text.length() - 1))
+		_name_refresh(), 120))
+	edit_keys.add_child(_name_key("Clear", func():
+		_profile_name_text = ""
+		_name_shift = true
+		_bind_show.call_deferred("name"), 120))
+
+# Key grid for Game Keys: one press picks the key.
+func _bind_key_picker(id: String) -> void:
+	var bb = main.button_bindings
+	var rows := [
+		[["1", KEY_1], ["2", KEY_2], ["3", KEY_3], ["4", KEY_4], ["5", KEY_5], ["6", KEY_6], ["7", KEY_7], ["8", KEY_8], ["9", KEY_9], ["0", KEY_0]],
+		[["Q", KEY_Q], ["W", KEY_W], ["E", KEY_E], ["R", KEY_R], ["T", KEY_T], ["Y", KEY_Y], ["U", KEY_U], ["I", KEY_I], ["O", KEY_O], ["P", KEY_P]],
+		[["A", KEY_A], ["S", KEY_S], ["D", KEY_D], ["F", KEY_F], ["G", KEY_G], ["H", KEY_H], ["J", KEY_J], ["K", KEY_K], ["L", KEY_L]],
+		[["Z", KEY_Z], ["X", KEY_X], ["C", KEY_C], ["V", KEY_V], ["B", KEY_B], ["N", KEY_N], ["M", KEY_M]],
+		[["Esc", KEY_ESCAPE], ["Tab", KEY_TAB], ["Shift", KEY_SHIFT], ["Ctrl", KEY_CTRL], ["Alt", KEY_ALT], ["Space", KEY_SPACE], ["Enter", KEY_ENTER]],
+		[["Up", KEY_UP], ["Down", KEY_DOWN], ["Left", KEY_LEFT], ["Right", KEY_RIGHT], ["Bksp", KEY_BACKSPACE], ["F1", KEY_F1], ["F2", KEY_F2], ["F3", KEY_F3], ["F4", KEY_F4], ["F5", KEY_F5]],
+	]
+	for keys in rows:
+		var line := HBoxContainer.new()
+		line.add_theme_constant_override("separation", 6)
+		line.alignment = BoxContainer.ALIGNMENT_CENTER
+		line.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_bind_box.add_child(line)
+		for k in keys:
+			var code: int = k[1]
+			var w := 64 if String(k[0]).length() <= 2 else 100
+			line.add_child(_name_key(k[0], func():
+				bb.set_game_key(id, code)
+				_bind_show.call_deferred("game"), w))
+
+const NAME_KEY_HEIGHT := 50
+
+## Steam Frame, AI 3D tab: what Quality and Hz Cap say once the headset can
+## make the depth itself.
+## The Quality button's tooltip on the Steam Frame, by the choice it shows
+## (the labels are SettingsController.FRAME_DEPTH_LABELS, "Meteor", and
+## "Needs Meteor" for a build without on-headset depth). Two lines at most.
+const FRAME_DEPTH_QUALITY_TIPS := {
+	"Meteor": "Depth made on your PC by Nightfall Meteor and sent with the picture: the sharpest, and the\nlightest on the headset. Press to change to a model that runs on the headset itself.",
+	"Headset: GPU": "Depth made on the headset's graphics chip: about as fine as Detail and twice as quick, and it\nleaves the processor free for voice typing. Drawing frames takes priority over refreshing depth.",
+	"Headset: Detail": "Depth made on the headset's processor with the finer model. The slowest of the three headset\nchoices and the heaviest on the processor; voice typing takes longer while it runs.",
+	"Headset: Light": "Depth made on the headset's processor with a small, fast model: coarser depth, the least work\nof the three headset choices.",
+	"Needs Meteor": "Where the depth comes from. This build makes none on the headset,\nso it needs Nightfall Meteor on your PC.",
+}
+
+## Shown in place of the above while the stream passes through a Meteor
+## that isn't offering depth, which is why "Meteor" is not among the choices.
+const FRAME_DEPTH_METEOR_OFF_TIP := "Meteor on your PC isn't offering depth: \"Host depth\" is switched off in its menu, or still loading.\nUntil it is, depth is made on the headset. Press to change between the headset's models."
+
+func _through_meteor() -> bool:
+	var manager = main.get("stream_manager")
+	return manager != null and manager.has_method("through_meteor") and manager.through_meteor()
+
+## Steam Frame: Stream Link's tooltip again, for a stream that has started or
+## stopped (it says so when the stream isn't going through Meteor).
+func refresh_link_tip() -> void:
+	var btn = main.get("_ui_second_link_btn")
+	if main.get("device_is_steam_frame") == true and btn is Button and is_instance_valid(btn):
+		update_option_btn(btn, FrameSecondLink.MODE_LABELS[main.settings.frame_link_mode])
+
+func _meteor_without_depth() -> bool:
+	var manager = main.get("stream_manager")
+	if manager == null or main.get("is_streaming") != true or not manager.has_method("meteor_address"):
+		return false
+	return not manager.meteor_address().is_empty() and MeteorDepthReceiver.is_supported() and manager.meteor_depth_info().is_empty()
+
+static func frame_depth_quality_tip(choice: String) -> String:
+	return FRAME_DEPTH_QUALITY_TIPS.get(choice, "Where the 3D depth is made: on your PC by Nightfall Meteor, or on the headset by one of three models.")
+const FRAME_DEPTH_RATE_TIP := "How often the headset's depth model runs. Auto starts at 20 and slows when frames run late.\nLower is cooler, with steadier frames and typing. Detail can't keep up above about 15."
+
+## The Buttons tab's entry for the custom gamepad layout's button mapping.
+const CUSTOM_GAMEPAD_LABEL := "Custom Gamepad"
+
+func _name_key(label: String, action: Callable, width: int = 64) -> Button:
+	var b := Button.new()
+	b.text = label
+	b.focus_mode = Control.FOCUS_NONE
+	b.custom_minimum_size = Vector2(width, NAME_KEY_HEIGHT)
+	b.add_theme_font_size_override("font_size", 26)
+	_make_scroll_friendly(b)
+	b.pressed.connect(_on_scroll_friendly_pressed.bind(action))
+	return b
+
+var _bind_page := "root"
+
+# The menu's status line (stream figures that keep changing) is a distraction
+# right under the keyboard while a profile is being named.
+func _refresh_status_line() -> void:
+	if main._ui_status_label:
+		main._ui_status_label.modulate.a = 0.0 if (_current_tab == BUTTONS_TAB and _bind_page == "name") else 1.0
+
+func _bind_show(page: String, hand: String = "", control: String = "", category: String = "") -> void:
+	if not _bind_box:
+		return
+	var bb = main.button_bindings
+	_bind_page = page
+	_refresh_status_line()
+	for ch in _bind_box.get_children():
+		_bind_box.remove_child(ch)
+		ch.queue_free()
+	bb.buttons.clear()
+	bb.enabled_button = null
+	var hand_name := "Right Controller" if hand == "right" else "Left Controller"
+	match page:
+		"root":
+			var r1 := _bind_row()
+			bb.enabled_button = _bind_btn(r1, "Custom Buttons", "On" if bb.enabled else "Off",
+				"Off: every button does its Default job, whatever you've set (your own layout is kept for when this is back on). Controller mapping modes take over the buttons either way.", bb.toggle_enabled)
+			_bind_btn(r1, "Reset Buttons", "", "Reset your custom buttons, Keyboard+Mouse keys or gamepad layout (you can save a profile first).", _bind_show.bind("confirm_reset"))
+			_bind_btn(r1, "Profiles", bb.current_profile if bb.current_profile != "" else "None",
+				"Save the current buttons as a named profile, or load, update or delete a saved one.", _bind_show.bind("profiles"))
+			var r2 := _bind_row()
+			_bind_btn(r2, "Left Controller", "D-pad View Stick Bumper", "Choose what the left controller's buttons do.", _bind_show.bind("hand", "left"))
+			_bind_btn(r2, "Right Controller", "A B X Y Menu Stick Bumper", "Choose what the right controller's buttons do.", _bind_show.bind("hand", "right"))
+			# Not "Gamepad Layout" with the Control tab's value under it: the
+			# two read the same there and here, and do different things (that
+			# one picks a layout, this one opens the custom one's mapping).
+			_bind_btn(r2, CUSTOM_GAMEPAD_LABEL, "Button Mapping",
+				"Make your own gamepad layout: which gamepad button each Frame button presses. Used while Control > Gamepad Layout is Custom. Saved with your profiles.", _bind_show.bind("pad"))
+			_bind_btn(r2, "Game Keys", "Keyboard+Mouse", "Choose which key each control presses in Game Controller's Keyboard+Mouse mode. Saved with your profiles.", _bind_show.bind("game"))
+		"pad":
+			_bind_header("%s (used while Control > Gamepad Layout is Custom)" % CUSTOM_GAMEPAD_LABEL)
+			var items := []
+			for id in bb.PAD_CONTROL_ORDER:
+				items.append([bb.PAD_CONTROLS[id][0], bb.pad_label(id), "Pick the gamepad button this presses.", _bind_show.bind("padbtn", "", id)])
+			_bind_grid(items, true)
+			var row := _bind_row()
+			_bind_btn(row, "Layout In Use", main.settings_controller.GAMEPAD_LAYOUT_LABELS[main.settings.gamepad_layout],
+				"Switch Gamepad mode between Standard, Swapped and this Custom layout.", func():
+					main.settings_controller.toggle_face_swap()
+					_bind_show("pad"))
+			_bind_btn(row, "Reset Layout", "", "Back to the standard layout (A=A, bumpers and grips=LB/RB, View=Back, Menu=Start...).", func():
+				bb.reset_pad_map()
+				_bind_show("pad"))
+			_bind_btn(row, "< Back", "", "Back", _bind_show.bind("root"))
+		"padbtn":
+			_bind_header("%s presses: %s" % [bb.PAD_CONTROLS[control][0], bb.pad_label(control)])
+			var items := []
+			for pb in bb.PAD_BUTTONS:
+				var flag: int = pb[1]
+				items.append([pb[0], "", "Press the gamepad's %s." % pb[0], func():
+					bb.set_pad_button(control, flag)
+					_bind_show("pad")])
+			_bind_grid(items)
+			_bind_btn(_bind_row(), "< Back", "", "Back", _bind_show.bind("pad"))
+		"game":
+			_bind_header("Game Keys (Keyboard+Mouse mode)")
+			var items := []
+			for id in bb.GAME_CONTROL_ORDER:
+				items.append([bb.GAME_CONTROLS[id][0], bb.game_key_label(id), "Pick the key this control presses.", _bind_show.bind("gamekey", "", id)])
+			_bind_grid(items, true)
+			var row := _bind_row()
+			_bind_btn(row, "Reset Game Keys", "", "Back to the default game keys (WASD, Space, R, E, F...).", func():
+				bb.reset_game_keys()
+				_bind_show("game"))
+			_bind_btn(row, "< Back", "", "Back", _bind_show.bind("root"))
+		"gamekey":
+			_bind_header("%s presses: %s" % [bb.GAME_CONTROLS[control][0], bb.game_key_label(control)])
+			_bind_key_picker(control)
+			var row := _bind_row()
+			_bind_btn(row, "None", "", "This control presses nothing.", func():
+				bb.set_game_key(control, 0)
+				_bind_show("game"))
+			_bind_btn(row, "< Back", "", "Back", _bind_show.bind("game"))
+		"confirm_reset":
+			_bind_header("Reset what?  (Save a profile first to keep what you have now.)")
+			var row := _bind_row()
+			_bind_btn(row, "Save Profile First", "", "Save what you have now as a profile, then come back here.", func():
+				_profile_name_text = bb.next_profile_name()
+				_after_profile_save = "confirm_reset"
+				_bind_show("name"))
+			_bind_btn(row, "Cancel", "", "Keep everything as it is.", _bind_show.bind("root"))
+			var row2 := _bind_row()
+			_bind_btn(row2, "Reset Custom Buttons", "", "Only the desktop buttons (Left/Right Controller pages).", func():
+				bb.reset_defaults()
+				_bind_show("root"))
+			_bind_btn(row2, "Reset KBM Keys", "", "Only the Keyboard+Mouse game keys.", func():
+				bb.reset_game_keys()
+				_bind_show("root"))
+			_bind_btn(row2, "Reset Gamepad Layout", "", "Only the custom gamepad layout.", func():
+				bb.reset_pad_map()
+				_bind_show("root"))
+			_bind_btn(row2, "Reset All", "", "All three at once.", func():
+				bb.reset_defaults()
+				bb.reset_pad_map()
+				bb.reset_game_keys()
+				bb.current_profile = ""
+				bb.save()
+				_bind_show("root"))
+		"profiles":
+			_bind_header("Button Profiles" + ("  (last used: %s)" % bb.current_profile if bb.current_profile != "" else ""))
+			var items := []
+			items.append(["+ Save as New", "", "Save the current buttons as a new profile and name it.", func():
+				_after_profile_save = ""
+				_profile_name_text = bb.next_profile_name()
+				_bind_show("name")])
+			items.append([bb.DEFAULT_PROFILE, "", "Nightfall's own buttons, game keys and gamepad layout. Loads at once; your saved profiles stay.", func():
+				bb.load_default_profile()
+				_bind_show("root")])
+			for pname in bb.profile_names():
+				items.append([String(pname), "", "Load, update or delete this profile.", _bind_show.bind("profile", "", String(pname))])
+			_bind_grid(items)
+			_bind_btn(_bind_row(), "< Back", "", "Back", _bind_show.bind("root"))
+		"profile":
+			_bind_header("Profile: " + control)
+			var row := _bind_row()
+			_bind_btn(row, "Load", "", "Use this profile's buttons now.", func():
+				bb.load_profile(control)
+				_bind_show("root"))
+			_bind_btn(row, "Update", "", "Replace this profile with the buttons you have now.", func():
+				bb.save_profile(control)
+				_bind_show("profiles"))
+			_bind_btn(row, "Delete", "", "Delete this profile.", _bind_show.bind("confirm_delete", "", control))
+			_bind_btn(_bind_row(), "< Back", "", "Back", _bind_show.bind("profiles"))
+		"confirm_delete":
+			_bind_header("Delete profile \"%s\"?" % control)
+			var row := _bind_row()
+			_bind_btn(row, "Yes, Delete", "", "Delete it for good.", func():
+				bb.delete_profile(control)
+				_bind_show("profiles"))
+			_bind_btn(row, "Cancel", "", "Keep it.", _bind_show.bind("profile", "", control))
+		"name":
+			_name_label = _bind_header("Name: " + _profile_name_text + "_")
+			# Four rows of keys, with the editing keys and Save/Cancel in
+			# columns beside them, so the whole page fits above the menu's
+			# status line and grab bar (a fifth row ran into them).
+			var split := HBoxContainer.new()
+			split.add_theme_constant_override("separation", 18)
+			split.alignment = BoxContainer.ALIGNMENT_CENTER
+			split.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			_bind_box.add_child(split)
+			var keys_box := VBoxContainer.new()
+			keys_box.add_theme_constant_override("separation", 6)
+			keys_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			split.add_child(keys_box)
+			var edit_box := VBoxContainer.new()
+			edit_box.add_theme_constant_override("separation", 6)
+			edit_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			split.add_child(edit_box)
+			_bind_name_keys(keys_box, edit_box)
+			var row := VBoxContainer.new()
+			row.add_theme_constant_override("separation", 6)
+			row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			split.add_child(row)
+			var save_key := _name_key("Save", func():
+				var pname := _profile_name_text.strip_edges()
+				if pname.is_empty():
+					return
+				if bb.has_profile(pname):
+					_bind_show("confirm_overwrite", "", pname)
+					return
+				bb.save_profile(pname)
+				_bind_show(_take_after_save()), 170)
+			save_key.custom_minimum_size.y = NAME_KEY_HEIGHT * 2 + 6
+			_set_button_tooltip(save_key, "Save the current buttons under this name.")
+			row.add_child(save_key)
+			var cancel_key := _name_key("Cancel", func(): _bind_show(_take_after_save()), 170)
+			cancel_key.custom_minimum_size.y = NAME_KEY_HEIGHT * 2 + 6
+			_set_button_tooltip(cancel_key, "Don't save.")
+			row.add_child(cancel_key)
+		"confirm_overwrite":
+			_bind_header("\"%s\" already exists. Replace it?" % control)
+			var row := _bind_row()
+			_bind_btn(row, "Replace", "", "Overwrite it with the current buttons.", func():
+				bb.save_profile(control)
+				_bind_show(_take_after_save()))
+			_bind_btn(row, "Rename", "", "Pick a different name.", _bind_show.bind("name"))
+		"hand":
+			_bind_header(hand_name + "  (trigger = left click, grip = right click)")
+			var items := []
+			for c in ButtonBindings.CONTROL_ORDER:
+				if ButtonBindings.CONTROLS[c][1] == hand:
+					items.append([ButtonBindings.CONTROLS[c][0], bb.label_for(c), "Choose what this button does.", _bind_show.bind("category", hand, c)])
+			_bind_grid(items, true)
+			_bind_btn(_bind_row(), "< Back", "", "Back", _bind_show.bind("root"))
+		"category":
+			_bind_header("%s: %s  (now: %s)" % [hand_name, ButtonBindings.CONTROLS[control][0], bb.label_for(control)])
+			var items := []
+			items.append(["All", "", "Show every choice.", _bind_show.bind("action", hand, control, "all")])
+			for cat in ButtonBindings.CATEGORIES:
+				items.append([cat[1], "", "Show the " + cat[1] + " choices.", _bind_show.bind("action", hand, control, cat[0])])
+			items.append(["None", "", "This button does nothing.", func():
+				bb.set_binding(control, "none")
+				_bind_show("hand", hand)])
+			_bind_grid(items)
+			_bind_btn(_bind_row(), "< Back", "", "Back", _bind_show.bind("hand", hand))
+		"action":
+			var cat_label := "All" if category == "all" else category
+			for cat in ButtonBindings.CATEGORIES:
+				if cat[0] == category:
+					cat_label = cat[1]
+			_bind_header("%s: %s  -  %s" % [hand_name, ButtonBindings.CONTROLS[control][0], cat_label])
+			var items := []
+			for id in ButtonBindings.ACTIONS:
+				var entry: Array = ButtonBindings.ACTIONS[id]
+				if entry[3] == category or (category == "all" and entry[3] != ""):
+					var mark := " *" if bb.bindings.get(control, "") == id else ""
+					items.append([entry[0] + mark, "", "Use this.", func():
+						bb.set_binding(control, id)
+						_bind_show("hand", hand)])
+			_bind_grid(items)
+			_bind_btn(_bind_row(), "< Back", "", "Back", _bind_show.bind("category", hand, control))
+	refresh_ui_buttons()
 
 func _build_tab_buttons(parent: HBoxContainer) -> void:
 	for definition in MenuSchema.get_tab_buttons():
@@ -1804,8 +2604,15 @@ func _build_tab_buttons(parent: HBoxContainer) -> void:
 		button.text = definition["label"]
 		_set_button_tooltip(button, definition["tooltip"])
 		button.focus_mode = Control.FOCUS_NONE
-		button.custom_minimum_size = Vector2(160, 44)
+		button.custom_minimum_size = Vector2(160, 60)
 		button.add_theme_font_size_override("font_size", 22)
+		# Same margins as the tab styles switch_tab() applies, from the start.
+		for state in ["normal", "hover", "pressed", "hover_pressed", "disabled", "focus"]:
+			var sb := StyleBoxFlat.new()
+			sb.bg_color = Color(1, 1, 1, 0.12 if state != "normal" and state != "disabled" else 0.04)
+			sb.set_corner_radius_all(16)
+			sb.set_content_margin_all(12)
+			button.add_theme_stylebox_override(state, sb)
 		button.add_theme_color_override(
 			"font_color",
 			Color(1, 1, 1, 1.0) if definition["index"] == 0 else Color(1, 1, 1, 0.5)
@@ -1816,6 +2623,10 @@ func _build_tab_buttons(parent: HBoxContainer) -> void:
 		set(definition["field"], button)
 		parent.add_child(button)
 		button.button_down.connect(switch_tab.bind(definition["index"]))
+		if definition["index"] == BUTTONS_TAB:
+			# Pressing the tab always lands on its front page, also from one
+			# of its own sub-pages (a controller's buttons, a picker...).
+			button.button_down.connect(_bind_show.bind("root"))
 
 func _build_menu_tab(
 	parent: VBoxContainer,
@@ -1831,17 +2642,29 @@ func _build_menu_tab(
 
 	var scrollable: bool = schema.get("scrollable", false)
 	var content: VBoxContainer = _build_scroll_page(tab) if scrollable else tab
+	tab.set_meta("content", content)
 	var rows: Array = schema["rows"]
 	for row_index in rows.size():
 		var row_schema: Dictionary = rows[row_index]
+		# A row whose options are all hidden on this device (for example the
+		# Steam Frame-only rows elsewhere, or Input on the Frame) takes its
+		# title and gap with it. The buttons are still created: code holds them.
+		var row_used := false
+		for option in row_schema["options"]:
+			if option["visible"]:
+				row_used = true
 		if row_index > 0:
 			var gap := Control.new()
 			gap.custom_minimum_size = Vector2(0, 20)
 			gap.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			gap.visible = row_used
 			content.add_child(gap)
 		if row_schema.has("title"):
-			content.add_child(_make_section_title(row_schema["title"]))
+			var row_title := _make_section_title(row_schema["title"])
+			row_title.visible = row_used
+			content.add_child(row_title)
 		var row := HBoxContainer.new()
+		row.visible = row_used
 		row.name = row_schema["node_name"]
 		row.add_theme_constant_override("separation", 12)
 		row.alignment = BoxContainer.ALIGNMENT_CENTER
@@ -1858,6 +2681,9 @@ func _build_menu_tab(
 			button.disabled = option["disabled"]
 			main.set(field, button)
 			row.add_child(button)
+			if option.get("slider", false):
+				_make_slider(button, option)
+				continue
 			if scrollable:
 				_make_scroll_friendly(button)
 			_connect_menu_action(button, option, scrollable)
@@ -1867,12 +2693,12 @@ func _build_menu_tab(
 # the tab bar, status line and grab bar) and scrolls content of any height.
 # Scrolling works by pressing and dragging anywhere on the page (as on the
 # Quest home screen) or with the scrollbar.
-func _build_scroll_page(tab: VBoxContainer) -> VBoxContainer:
+func _build_scroll_page(tab: VBoxContainer, top_margin: int = 12) -> VBoxContainer:
 	tab.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	var margin := MarginContainer.new()
 	margin.add_theme_constant_override("margin_left", 24)
 	margin.add_theme_constant_override("margin_right", 24)
-	margin.add_theme_constant_override("margin_top", 12)
+	margin.add_theme_constant_override("margin_top", top_margin)
 	margin.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	tab.add_child(margin)
@@ -1975,6 +2801,68 @@ func _on_scroll_drag_input(event: InputEvent) -> void:
 			_settings_scroll.scroll_vertical = clampi(
 				_settings_scroll.scroll_vertical - int(movement), 0, maximum)
 			_settings_scroll.accept_event()
+
+const MUTED_COLOR := Color(1.0, 0.42, 0.38, 1.0)
+var _mute_btn: Button
+
+func _stream_muted() -> bool:
+	return main.settings != null and main.settings.audio_boost_db <= -60
+
+# The Stream tab's name turns red while muted: that is where Volume lives.
+func _tint_stream_tab() -> void:
+	if _tab_btn_stream == null or not _stream_muted() or main.get("device_is_steam_frame") != true:
+		return
+	_tab_btn_stream.add_theme_color_override("font_color", MUTED_COLOR if _current_tab == 1 else Color(MUTED_COLOR, 0.8))
+
+## Exit's two looks (normal, hover), kept so its lower-left corner can change.
+var _exit_styles: Array = []
+
+## The rounded lower-left corner belongs to whichever button is the left end
+## of the top-right group: Muted while it is shown, otherwise Exit. With both
+## rounded, a wedge of the panel showed between them.
+func _shape_exit_corner() -> void:
+	var exit_is_left_end: bool = _mute_btn == null or not _mute_btn.visible
+	for style in _exit_styles:
+		(style as StyleBoxFlat).set_corner_radius(CORNER_BOTTOM_LEFT, 32 if exit_is_left_end else 0)
+
+## Called whenever the stream volume changes.
+func refresh_mute_indicator() -> void:
+	if _tab_btn_stream:
+		_tab_btn_stream.add_theme_color_override("font_color", Color(1, 1, 1, 1.0) if _current_tab == 1 else Color(1, 1, 1, 0.5))
+		_tint_stream_tab()
+	if _mute_btn:
+		var show: bool = _stream_muted() and main.get("device_is_steam_frame") == true
+		if _mute_btn.visible != show:
+			_mute_btn.visible = show
+			_shape_exit_corner()
+			# The pointer's list of menu buttons is rebuilt on tab changes.
+			var ui_root = main.get_node_or_null("%UIRoot")
+			if ui_root and main.xr_interaction:
+				var ui_buttons = []
+				_collect_buttons(ui_root, ui_buttons)
+				main.xr_interaction.populate_ui_buttons(ui_buttons)
+
+## The menu pages whose option buttons a voice command may press (VoiceMenu).
+func voice_menu_roots() -> Array:
+	var roots := []
+	for page in [_tab_display, _tab_stream, _tab_control, _tab_ai3d, _tab_picture, _tab_settings]:
+		if page:
+			roots.append(page)
+	return roots
+
+## Presses a menu option button the way a click does (voice commands). Most
+## act when pressed down; the ones on scrolling pages act on release.
+func press_option(button: Button) -> void:
+	if button.button_down.get_connections().size() > 0:
+		button.button_down.emit()
+	else:
+		button.pressed.emit()
+
+## The Buttons tab's front page again (after a voice command loaded a profile
+## or switched Custom Buttons).
+func refresh_buttons_tab() -> void:
+	if _bind_box:
+		_bind_show("root")
 
 func _on_scroll_friendly_pressed(callable: Callable) -> void:
 	if _scroll_dragged:
@@ -2102,9 +2990,157 @@ func _compose_option_text(btn: Button) -> void:
 	var value: String = btn.get_meta(OPTION_VALUE_META, "")
 	btn.text = label if value.is_empty() else label + "\n" + Localization.t(value)
 
-func update_option_btn(btn: Button, value: String):
-	if btn == null or not btn.has_meta(OPTION_LABEL_META):
+# --- Slider buttons (Steam Frame: Curve, Glow, Volume, Separation, Convergence) ---
+# An option button you drag across (or click at a spot) to set 0-100. A blue
+# bar along the bottom shows the value. While dragging the action is called
+# with commit=false; on release with commit=true (which saves).
+const SLIDER_MARGIN := 18.0
+
+func _make_slider(btn: Button, option: Dictionary) -> void:
+	btn.set_meta("slider", true)
+	btn.set_meta("slider_value", -1)
+	if int(option.get("detent", -1)) >= 0:
+		btn.set_meta("slider_detent", int(option["detent"]))
+	var track := ColorRect.new()
+	track.name = "SliderTrack"
+	track.color = SLIDER_TRACK_COLOR
+	track.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	btn.add_child(track)
+	var fill := ColorRect.new()
+	fill.name = "SliderFill"
+	fill.color = SLIDER_FILL_COLOR
+	fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	btn.add_child(fill)
+	btn.resized.connect(_layout_slider.bind(btn))
+	var target := _menu_action_target(option["target"])
+	var action: StringName = option["action"]
+	if target == null or not target.has_method(action):
+		push_error("Invalid slider action %s.%s" % [option["target"], action])
 		return
+	btn.gui_input.connect(_on_slider_input.bind(btn, Callable(target, action)))
+
+func _layout_slider(btn: Button) -> void:
+	var track := btn.get_node_or_null("SliderTrack") as ColorRect
+	var fill := btn.get_node_or_null("SliderFill") as ColorRect
+	if not track or not fill:
+		return
+	var w := maxf(btn.size.x - SLIDER_MARGIN * 2.0, 1.0)
+	var y := btn.size.y - 16.0
+	track.position = Vector2(SLIDER_MARGIN, y)
+	track.size = Vector2(w, 6.0)
+	var v := clampi(int(btn.get_meta("slider_value", 0)), 0, 100)
+	fill.position = track.position
+	fill.size = Vector2(w * float(v) / 100.0, 6.0)
+
+const SLIDER_FILL_COLOR := Color(0.35, 0.68, 1.0, 0.95)
+const SLIDER_TRACK_COLOR := Color(1, 1, 1, 0.12)
+const SLIDER_ALERT_COLOR := Color(1.0, 0.27, 0.27, 0.9)
+
+## `value` is the bar's fill, 0-100. `text` replaces the default "NN%" label
+## (Volume shows dB, Separation its own percentage). `alert` turns the bar
+## red (Volume while muted).
+func set_slider_value(btn: Button, value: int, text: String = "", alert: bool = false) -> void:
+	if btn == null or not btn.has_meta("slider"):
+		return
+	value = clampi(value, 0, 100)
+	btn.set_meta("slider_value", value)
+	btn.set_meta(OPTION_VALUE_META, text if not text.is_empty() else "%d%%" % value)
+	_compose_option_text(btn)
+	var track := btn.get_node_or_null("SliderTrack") as ColorRect
+	var fill := btn.get_node_or_null("SliderFill") as ColorRect
+	if track:
+		track.color = SLIDER_ALERT_COLOR if alert else SLIDER_TRACK_COLOR
+	if fill:
+		fill.color = SLIDER_ALERT_COLOR if alert else SLIDER_FILL_COLOR
+	_layout_slider(btn)
+
+## Turns a button made with make_option_btn() into a slider with `steps`
+## positions above zero (the menu schema's sliders have 20: 5% apart).
+## `detent` (0-100, the bar's fill) marks the default value, which is easier to land on.
+func make_slider_btn(btn: Button, target: StringName, action: StringName, steps: int = 20, detent: int = -1) -> void:
+	btn.set_meta("slider_steps", steps)
+	_make_slider(btn, {"target": target, "action": action, "detent": detent})
+
+# Steps are small targets for a pointer at arm's length (a third of a degree),
+# and letting go of the trigger nudges the aim. So: the value you are on holds
+# until the pointer clearly leaves it, a slider's default value catches the
+# pointer from further away, and a change in the last moment before the
+# trigger is released is taken back.
+const SLIDER_STICK := 0.8          # steps the pointer must move to leave a value
+const SLIDER_DETENT_REACH := 0.85  # steps either side that land on the default
+const SLIDER_RELEASE_GUARD_MS := 180
+
+func _slider_value_at(btn: Button, x: float) -> int:
+	var w := maxf(btn.size.x - SLIDER_MARGIN * 2.0, 1.0)
+	var steps := float(maxi(int(btn.get_meta("slider_steps", 20)), 1))
+	var at := clampf((x - SLIDER_MARGIN) / w, 0.0, 1.0) * steps
+	var pick := roundf(at)
+	var detent := int(btn.get_meta("slider_detent", -1))
+	if detent >= 0:
+		var detent_step := roundf(detent * steps / 100.0)
+		if absf(at - detent_step) < SLIDER_DETENT_REACH:
+			pick = detent_step
+	var current := int(btn.get_meta("slider_value", -1))
+	if current >= 0 and btn.get_meta("slider_dragging", false):
+		var current_step := roundf(current * steps / 100.0)
+		if pick != current_step and absf(at - current_step) < SLIDER_STICK:
+			pick = current_step
+	return int(round(pick * 100.0 / steps))
+
+func _on_slider_input(event: InputEvent, btn: Button, action: Callable) -> void:
+	if btn.disabled:
+		btn.set_meta("slider_dragging", false)
+		return
+	var now := Time.get_ticks_msec()
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+		if event.pressed:
+			# A press goes straight to the spot pointed at (no stickiness yet).
+			btn.set_meta("slider_dragging", false)
+			var v := _slider_value_at(btn, event.position.x)
+			btn.set_meta("slider_dragging", true)
+			btn.set_meta("slider_before_change", -1)
+			if v != int(btn.get_meta("slider_value", -1)):
+				action.call(v, false)
+		elif btn.get_meta("slider_dragging", false):
+			btn.set_meta("slider_dragging", false)
+			var final := int(btn.get_meta("slider_value", 0))
+			var before := int(btn.get_meta("slider_before_change", -1))
+			if before >= 0 and now - int(btn.get_meta("slider_changed_ms", 0)) < SLIDER_RELEASE_GUARD_MS:
+				final = before # the release jolted it off the value you had
+			action.call(final, true)
+	elif event is InputEventMouseMotion and btn.get_meta("slider_dragging", false):
+		if event.button_mask & MOUSE_BUTTON_MASK_LEFT:
+			var v := _slider_value_at(btn, event.position.x)
+			var current := int(btn.get_meta("slider_value", -1))
+			if v != current:
+				btn.set_meta("slider_before_change", current)
+				btn.set_meta("slider_changed_ms", now)
+				action.call(v, false)
+
+func update_option_btn(btn: Button, value: String):
+	if btn == null or not btn.has_meta(OPTION_LABEL_META) or btn.has_meta("slider"):
+		return
+	# Steam Frame: Quality has four choices that differ too much for one
+	# tooltip, so the tooltip is the one for the choice now showing. Set here,
+	# before the early return below, because the menu is built before it is
+	# known whether this build can make depth on the headset (which left the
+	# tooltip saying "made by Nightfall Meteor on your PC" for every choice).
+	# (Asked for by name: the menu tests drive this with a stand-in for main
+	# that has neither property.)
+	if main.get("device_is_steam_frame") == true and btn == main.get("_ui_3d_btn"):
+		_set_button_tooltip(btn, FRAME_DEPTH_METEOR_OFF_TIP if _meteor_without_depth() else frame_depth_quality_tip(value))
+	# Head Lock's three choices likewise.
+	if main.get("device_is_steam_frame") == true and btn == main.get("_ui_voice_commands_btn") and MenuSchema.VOICE_COMMANDS_TIPS.has(value):
+		_set_button_tooltip(btn, MenuSchema.VOICE_COMMANDS_TIPS[value])
+	if main.get("device_is_steam_frame") == true and btn == main.get("_ui_logging_btn") and MenuSchema.LOGGING_TIPS.has(value):
+		_set_button_tooltip(btn, MenuSchema.LOGGING_TIPS[value])
+	if main.get("device_is_steam_frame") == true and btn == main.get("_ui_head_lock_btn") and MenuSchema.HEAD_LOCK_TIPS.has(value):
+		_set_button_tooltip(btn, MenuSchema.HEAD_LOCK_TIPS[value])
+	# Stream Link's three choices likewise.
+	if main.get("device_is_steam_frame") == true and btn == main.get("_ui_second_link_btn"):
+		var link_choice := FrameSecondLink.MODE_LABELS.find(value)
+		if link_choice >= 0:
+			_set_button_tooltip(btn, FrameSecondLink.tip(link_choice, main.get("is_streaming") == true, _through_meteor()))
 	if btn.get_meta(OPTION_VALUE_META, null) == value: return
 	btn.set_meta(OPTION_VALUE_META, value)
 	_compose_option_text(btn)
@@ -2115,20 +3151,52 @@ func update_codec_btn():
 func update_ctrl_mode_btn():
 	if main._ui_ctrl_mode_btn and main.controller_mapper:
 		update_option_btn(main._ui_ctrl_mode_btn, main.controller_mapper.get_mode_label())
+		# Amber text while a mode is on, matching the menu title.
+		var on: bool = main.controller_mapper.is_active()
+		var col := Color(1.0, 0.72, 0.25, 1) if on else Color(1, 1, 1, 0.85)
+		main._ui_ctrl_mode_btn.add_theme_color_override("font_color", col)
+		main._ui_ctrl_mode_btn.add_theme_color_override("font_hover_color", Color(1.0, 0.8, 0.4, 1) if on else Color(1, 1, 1, 1))
+	update_brand_label()
+
+# The menu title also says when a Game Controller mode is on (the VR cursor,
+# clicks and custom buttons are all handed to the game then).
+func update_brand_label() -> void:
+	if not _brand_label:
+		return
+	if _current_tab == SETTINGS_TAB or _current_tab == PCVR_PAGE:
+		_brand_label.text = "PCVR Settings" if _current_tab == PCVR_PAGE else "Advanced Settings"
+		_brand_label.add_theme_color_override("font_color", Color(1, 1, 1, 1))
+		return
+	var cm = main.controller_mapper
+	if cm and cm.is_active():
+		_brand_label.text = "Nightfall  -  %s Mode Active" % ("Keyboard+Mouse" if cm.ctrl_type == 2 else "Gamepad")
+		_brand_label.add_theme_color_override("font_color", Color(1.0, 0.72, 0.25, 1))
+	else:
+		_brand_label.text = "Nightfall"
+		_brand_label.add_theme_color_override("font_color", Color(1, 1, 1, 1))
 
 func update_ctrl_type_btn():
+	update_brand_label()
 	if main._ui_ctrl_type_btn and main.controller_mapper:
-		update_option_btn(main._ui_ctrl_type_btn, main.controller_mapper.type_labels[main.controller_mapper.ctrl_type])
+		update_option_btn(main._ui_ctrl_type_btn, main.controller_mapper.get_type_label())
 		if main._ui_btn_toggle_btn:
-			var is_kbm = (main.controller_mapper.ctrl_type == 2)
+			# Alternate Mode only matters for the Quest layouts (and KBM uses it
+			# differently); the Frame's gamepad mapping has no alt layer.
+			var is_kbm = (main.controller_mapper.ctrl_type == 2) or main.device_is_steam_frame
 			main._ui_btn_toggle_btn.disabled = is_kbm
 			main._ui_btn_toggle_btn.modulate = Color(1, 1, 1, 0.3) if is_kbm else Color(1, 1, 1, 1)
+			if main.device_is_steam_frame:
+				main._ui_btn_toggle_btn.visible = false
 
 func update_host_cursor_btn_state():
 	if not main._ui_host_cursor_btn:
 		return
 	var supported = main._host_cursor_toggle_supported
 	main._ui_host_cursor_btn.disabled = not supported
+	# Steam Frame: only Nightfall's own Polaris host can report the PC cursor,
+	# and that lookup is switched off - hide it rather than grey it out.
+	if main.device_is_steam_frame:
+		main._ui_host_cursor_btn.visible = false
 	main._ui_host_cursor_btn.modulate = Color(1, 1, 1, 0.3) if not supported else Color(1, 1, 1, 1)
 	update_option_btn(main._ui_host_cursor_btn, "On" if main.host_cursor_visible else "Off")
 

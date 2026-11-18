@@ -90,6 +90,11 @@ func screen_part(screen: VRScreen) -> Dictionary:
 func can_render_current_config() -> bool:
 	if "pcvr_test" in main and main.pcvr_test.is_exclusive():
 		return false
+	# Steam Frame: this renderer's shaders fail to link on the Frame's GLES
+	# driver and the failed start leaves GL state that crashes the next frame.
+	# Its layer types are also unsupported there; keep the legacy renderer.
+	if main.device_is_steam_frame:
+		return false
 	if not provider_registered or not main.primary_screen:
 		return false
 	# Independent browser outputs do not share the primary decoder or eyes.

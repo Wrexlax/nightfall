@@ -32,6 +32,10 @@ pub fn queue_balloon(message: String) {
 pub fn queue_pairing_balloon(pin: &str) {
     queue_balloon(format!("Pair Nightfall headset — PIN: {pin}  Click to approve or right-click for options"));
 }
+// Steam Frame: the Stream Link choice (proxy.rs, pick_link).
+const CMD_LINK_BOTH: usize = 40;
+const CMD_LINK_SECOND_FIRST: usize = 41;
+const CMD_LINK_FIRST_ONLY: usize = 42;
 const CMD_OPEN_LOG: usize = 1;
 const CMD_OPEN_SETTINGS: usize = 2;
 const CMD_QUIT: usize = 3;
@@ -65,6 +69,11 @@ const CMD_PAIR_APPROVE:usize=33;
 const CMD_PAIR_REJECT:usize=34;
 const CMD_INSTALL_VDD:usize=35;
 const CMD_ALLOW_FIREWALL:usize=36;
+// The Vulkan VDA models: any GPU, no TensorRT download (Linux's tray has had
+// these; without them Windows users on a GPU with no pinned TensorRT builder
+// file, such as an RTX 50, had no way to get VDA from the tray).
+const CMD_VDA_VULKAN_FULL: usize = 37;
+const CMD_VDA_VULKAN_FAST: usize = 38;
 const CMD_XR_GAME_BASE:usize=2000;
 static XR_GAMES:std::sync::Mutex<Vec<String>>=std::sync::Mutex::new(Vec::new());
 static XR_PENDING:std::sync::Mutex<Option<[u8;32]>>=std::sync::Mutex::new(None);
@@ -105,6 +114,14 @@ unsafe extern "system" fn window_proc(hwnd: HWND, message: u32, wparam: WPARAM, 
                 if let (Some(status), Some(stats)) = (STATUS.get(), STATS.get()) {
                     let title = wide(&format!("Nightfall Meteor {}", env!("METEOR_VERSION")));
                     AppendMenuW(menu, MF_STRING | MF_GRAYED, 0, title.as_ptr());
+                    // Host depth switched off is easy to miss further down
+                    // (an unticked line among many) and takes Meteor out of
+                    // the headset's depth choices: say so at the top, where
+                    // a click puts it back.
+                    if DEPTH.get().and_then(Option::as_ref).is_some_and(|depth| !depth.enabled()) {
+                        AppendMenuW(menu, MF_STRING, CMD_DEPTH_ENABLED, wide("Host depth is OFF - click here to turn it on").as_ptr());
+                        AppendMenuW(menu, MF_SEPARATOR, 0, std::ptr::null());
+                    }
                     let udp = stats.udp_flows.load(Ordering::Relaxed);
                     let tcp = stats.tcp_connections.load(Ordering::Relaxed);
                     let summary = wide(&if udp > 0 {
@@ -115,13 +132,31 @@ unsafe extern "system" fn window_proc(hwnd: HWND, message: u32, wparam: WPARAM, 
                         "Waiting for a client".to_string()
                     });
                     AppendMenuW(menu, MF_STRING | MF_GRAYED, 0, summary.as_ptr());
+                    // Steam Frame: which of the headset's two links the stream is
+                    // on, and the choice, which can be made here or on the headset
+                    // (proxy.rs, LINK_WANTED).
+                    let now = crate::proxy::now_ms();
+                    let ago = |then: u64| if then == 0 { None } else { Some(now.saturating_sub(then)) };
+                    let wanted = crate::proxy::LINK_WANTED.load(Ordering::Relaxed);
+                    let links = wide(&crate::proxy::link_status(
+                        udp > 0,
+                        ago(crate::proxy::LINK_TOLD_MS.load(Ordering::Relaxed)),
+                        ago(stats.second_link_ms.load(Ordering::Relaxed)),
+                        stats.second_link_only.load(Ordering::Relaxed),
+                        wanted,
+                    ));
+                    AppendMenuW(menu, MF_STRING | MF_GRAYED, 0, links.as_ptr());
+                    let checked = |choice: u8| if wanted == choice { MF_CHECKED } else { 0 };
+                    AppendMenuW(menu, MF_STRING | checked(crate::proxy::LINK_BOTH), CMD_LINK_BOTH, wide("    Multi-Link (Wi-Fi and adapter)").as_ptr());
+                    AppendMenuW(menu, MF_STRING | checked(crate::proxy::LINK_SECOND_FIRST), CMD_LINK_SECOND_FIRST, wide("    Adapter first (Wi-Fi as backup)").as_ptr());
+                    AppendMenuW(menu, MF_STRING | checked(crate::proxy::LINK_FIRST_ONLY), CMD_LINK_FIRST_ONLY, wide("    Wi-Fi only").as_ptr());
                     let sunshine = wide(&format!("Sunshine {}:{} - {}", status.sunshine_host, status.map.sunshine_base,
                         if status.sunshine_up.load(Ordering::Relaxed) { "running" } else { "not answering" }));
                     AppendMenuW(menu, MF_STRING | MF_GRAYED, 0, sunshine.as_ptr());
                     // Blocked silently, the Quest just doesn't find Meteor; say so here.
                     if let crate::firewall::Status::Windows { .. } = status.firewall() {
-                        AppendMenuW(menu, MF_STRING | MF_GRAYED, 0, wide("Windows Firewall is blocking the Quest").as_ptr());
-                        AppendMenuW(menu, MF_STRING, CMD_ALLOW_FIREWALL, wide("Allow the Quest through the firewall...").as_ptr());
+                        AppendMenuW(menu, MF_STRING | MF_GRAYED, 0, wide("Windows Firewall is blocking the headset").as_ptr());
+                        AppendMenuW(menu, MF_STRING, CMD_ALLOW_FIREWALL, wide("Allow the headset through the firewall...").as_ptr());
                     }
                     AppendMenuW(menu, MF_SEPARATOR, 0, std::ptr::null());
                 }
@@ -236,7 +271,20 @@ unsafe extern "system" fn window_proc(hwnd: HWND, message: u32, wparam: WPARAM, 
                                     AppendMenuW(model_menu, MF_SEPARATOR, 0, std::ptr::null());
                                     AppendMenuW(model_menu, MF_STRING, CMD_VDA_REMOVE, remove.as_ptr());
                                 }
+                                let offers = depth.vulkan_vda_offers();
+                                if !offers.is_empty() {
+                                    AppendMenuW(model_menu, MF_SEPARATOR, 0, std::ptr::null());
+                                }
+                                for (id, bytes) in offers {
+                                    let command = if id == crate::vda_vulkan::FULL { CMD_VDA_VULKAN_FULL } else { CMD_VDA_VULKAN_FAST };
+                                    let offer = wide(&format!("Download {} ({} MB, works on any GPU)", crate::depth::model_label(id), bytes.div_ceil(1_000_000)));
+                                    AppendMenuW(model_menu, MF_STRING, command, offer.as_ptr());
+                                }
                             }
+                        }
+                        if let crate::download::State::Failed(error) = depth.download.state() {
+                            let failed = wide(&format!("Last download failed: {}", error.chars().take(120).collect::<String>()));
+                            AppendMenuW(model_menu, MF_STRING | MF_GRAYED, 0, failed.as_ptr());
                         }
                         let label = wide(&format!("GPU / model: {}",depth.selection_label()));
                         AppendMenuW(menu, MF_POPUP, model_menu as usize, label.as_ptr());
@@ -419,6 +467,9 @@ unsafe extern "system" fn window_proc(hwnd: HWND, message: u32, wparam: WPARAM, 
                 CMD_OPEN_LOG => open_path(crate::logfile::path()),
                 CMD_OPEN_SETTINGS => crate::open_config_file(),
                 CMD_OPEN_MODELS => open_path(crate::config::default_models_dir()),
+                CMD_LINK_BOTH => crate::proxy::pick_link(crate::proxy::LINK_BOTH),
+                CMD_LINK_SECOND_FIRST => crate::proxy::pick_link(crate::proxy::LINK_SECOND_FIRST),
+                CMD_LINK_FIRST_ONLY => crate::proxy::pick_link(crate::proxy::LINK_FIRST_ONLY),
                 CMD_MUTE_MIC => {
                     if let Some(mic) = MIC.get().and_then(Option::as_ref) {
                         mic.muted.fetch_xor(true, Ordering::Relaxed);
@@ -432,6 +483,8 @@ unsafe extern "system" fn window_proc(hwnd: HWND, message: u32, wparam: WPARAM, 
                 CMD_VDA_CANCEL => { if let Some(depth) = depth { depth.download.cancel.store(true, Ordering::Relaxed); } }
                 CMD_VDA_REMOVE => { if let Some(depth) = depth { depth.remove_vda_download(); } }
                 CMD_VDA_LICENCE => open_url(crate::download::LICENCE_URL),
+                CMD_VDA_VULKAN_FULL => { if let Some(depth) = depth { depth.download_vulkan_vda(crate::vda_vulkan::FULL); } }
+                CMD_VDA_VULKAN_FAST => { if let Some(depth) = depth { depth.download_vulkan_vda(crate::vda_vulkan::FAST); } }
                 CMD_AUTOSTART => {
                     let on = !crate::desktop_windows::autostart_enabled();
                     match crate::desktop_windows::set_autostart(on) {

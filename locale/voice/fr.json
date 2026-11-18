@@ -1,0 +1,265 @@
+{
+	"whisper": "fr",
+	"on": [
+		"activé",
+		"activée",
+		"allumé",
+		"activer",
+		"allumer"
+	],
+	"off": [
+		"désactivé",
+		"désactivée",
+		"éteint",
+		"désactiver",
+		"éteindre"
+	],
+	"next": [
+		"suivant",
+		"suivante",
+		"changer"
+	],
+	"enable": [
+		"active",
+		"activez"
+	],
+	"disable": [
+		"désactive",
+		"désactivez"
+	],
+	"minus": [
+		"moins"
+	],
+	"plus": [
+		"plus"
+	],
+	"to": [
+		"à",
+		"sur"
+	],
+	"drop": [
+		"le",
+		"la",
+		"les",
+		"l",
+		"un",
+		"une",
+		"du",
+		"de",
+		"s il vous plaît",
+		"s il te plaît",
+		"mets",
+		"mettre",
+		"régler",
+		"règle"
+	],
+	"commands": {
+		"recenter": [
+			"recentrer",
+			"recentrer l écran",
+			"recentre"
+		],
+		"show menu": [
+			"afficher le menu",
+			"ouvrir le menu",
+			"montrer le menu"
+		],
+		"hide menu": [
+			"masquer le menu",
+			"fermer le menu",
+			"cacher le menu"
+		],
+		"menu": [
+			"menu"
+		],
+		"show keyboard": [
+			"afficher le clavier",
+			"ouvrir le clavier",
+			"montrer le clavier"
+		],
+		"hide keyboard": [
+			"masquer le clavier",
+			"fermer le clavier",
+			"cacher le clavier"
+		],
+		"keyboard": [
+			"clavier"
+		],
+		"head lock on": [
+			"verrouillage tête activé",
+			"verrouiller la tête",
+			"verrouillage de la tête activé"
+		],
+		"head lock off": [
+			"verrouillage tête désactivé",
+			"déverrouiller la tête",
+			"verrouillage de la tête désactivé"
+		],
+		"volume up": [
+			"plus fort",
+			"monter le volume",
+			"augmenter le volume"
+		],
+		"volume down": [
+			"moins fort",
+			"baisser le volume",
+			"diminuer le volume"
+		],
+		"volume #": [
+			"volume #"
+		],
+		"mute": [
+			"muet",
+			"couper le son",
+			"silence"
+		],
+		"unmute": [
+			"rétablir le son",
+			"remettre le son",
+			"son activé"
+		],
+		"curve #": [
+			"courbure #"
+		],
+		"flat screen": [
+			"écran plat",
+			"plat",
+			"sans courbure"
+		],
+		"passthrough fade #": [
+			"atténuer passthrough #",
+			"assombrir la pièce #"
+		],
+		"glow strength #": [
+			"intensité du halo #"
+		],
+		"glow size #": [
+			"taille du halo #"
+		],
+		"separation #": [
+			"séparation #"
+		],
+		"convergence #": [
+			"convergence #"
+		],
+		"select all": [
+			"tout sélectionner",
+			"sélectionner tout"
+		],
+		"copy": [
+			"copier"
+		],
+		"paste": [
+			"coller"
+		],
+		"cut": [
+			"couper"
+		],
+		"undo": [
+			"annuler"
+		],
+		"redo": [
+			"rétablir",
+			"refaire"
+		],
+		"save": [
+			"enregistrer",
+			"sauvegarder"
+		],
+		"find": [
+			"rechercher",
+			"chercher"
+		],
+		"new tab": [
+			"nouvel onglet"
+		],
+		"close tab": [
+			"fermer l onglet"
+		],
+		"close window": [
+			"fermer la fenêtre"
+		],
+		"switch window": [
+			"changer de fenêtre"
+		],
+		"show desktop": [
+			"afficher le bureau",
+			"montrer le bureau"
+		],
+		"task manager": [
+			"gestionnaire des tâches"
+		],
+		"start menu": [
+			"menu démarrer",
+			"touche windows"
+		],
+		"screenshot": [
+			"capture d écran"
+		],
+		"escape": [
+			"échap",
+			"échappement"
+		],
+		"enter": [
+			"entrée",
+			"touche entrée"
+		],
+		"tab key": [
+			"tabulation",
+			"touche tab"
+		],
+		"backspace": [
+			"retour arrière"
+		],
+		"delete": [
+			"supprimer",
+			"touche supprimer"
+		],
+		"page up": [
+			"page précédente",
+			"page haut"
+		],
+		"page down": [
+			"page suivante",
+			"page bas"
+		]
+	},
+	"typing": {
+		"clear": [
+			"effacer",
+			"efface"
+		],
+		"submit": [
+			"envoyer",
+			"valider"
+		],
+		"new line": [
+			"nouvelle ligne",
+			"à la ligne"
+		],
+		"new paragraph": [
+			"nouveau paragraphe"
+		],
+		"open parenthesis": [
+			"ouvrir la parenthèse",
+			"ouvrez la parenthèse"
+		],
+		"close parenthesis": [
+			"fermer la parenthèse",
+			"fermez la parenthèse"
+		]
+	},
+	"help": [
+		"Dites le nom d’un bouton et ce qu’il doit être : tous les boutons du menu fonctionnent ainsi",
+		"La valeur suivante du bouton",
+		"Un bouton sans choix : son nom seul"
+	],
+	"list": {
+		"commands": "Commandes",
+		"menu": "Tous les boutons du menu",
+		"typing": "Pendant la dictée",
+		"note": "Maintenez votre bouton vocal et dites une commande seule.",
+		"note_prefix": "Commencez chaque commande par « Nightfall ».",
+		"note_off": "Les commandes vocales sont désactivées : tout ce que vous dites est saisi."
+	}
+}

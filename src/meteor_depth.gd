@@ -11,6 +11,11 @@ extends RefCounted
 ## A worker thread connects, reads and decompresses, and keeps the newest
 ## RING_SIZE maps. The main thread only picks the map for the frame on screen
 ## (pick()), so no network or decompression work lands on the render loop.
+##
+## Steam Frame: a second connection can run beside the first, to Meteor's
+## address on the headset's second link (set_second()). Meteor sends every
+## map down each connection it has; a map is kept the first time it arrives
+## and its copy dropped, so the maps keep coming while either link holds.
 
 const HEADER_LEN := 32
 const MAGIC := 0x4D44464E # "NFDM", little-endian
@@ -28,6 +33,9 @@ const FIRST_MAP_GRACE_SEC := 3.0
 const STALL_SEC := 1.0
 ## Worker sleep when no data is waiting.
 const IDLE_USEC := 500
+## With two connections a map can arrive a little behind its copy. Further
+## behind than this it isn't late: the frame numbers have started again.
+const LATE_FRAMES := 1000
 
 var host := ""
 var port := 0
@@ -39,11 +47,17 @@ var bytes_received := 0
 var newest_frame := 0
 var host_latency_ms := 0.0
 
-var _thread: Thread
+## Maps that arrived first over each connection (the stream's own link, the
+## second link), for the log.
+var maps_by_link: Array[int] = [0, 0]
+
+# One worker for each connection: [the stream's own link, the second link].
+var _threads: Array = [null, null]
+var _hosts: Array[String] = ["", ""]
+var _link_running: Array[bool] = [false, false]
+var _link_connected: Array[bool] = [false, false]
+var _link_connected_at: Array[float] = [0.0, 0.0]
 var _mutex := Mutex.new()
-var _running := false
-var _connected := false
-var _connected_at := 0.0
 var _last_map_at := 0.0
 # {frame, epoch, map, width, height, latency_us}, oldest first. Guarded by _mutex.
 var _ring: Array[Dictionary] = []
@@ -53,24 +67,46 @@ static func is_supported() -> bool:
 	return ClassDB.class_exists("MeteorChannelCipher")
 
 func start(address: String, depth_port: int, meteor_key: String) -> void:
-	if address == host and depth_port == port and meteor_key == key and _thread:
+	if address == host and depth_port == port and meteor_key == key and _threads[0]:
 		return
 	stop()
 	host = address
 	port = depth_port
 	key = meteor_key
-	_running = true
-	_thread = Thread.new()
-	_thread.start(_run)
+	maps_by_link = [0, 0]
+	_start_link(0, address)
+
+## Meteor's address on the headset's second link, "" for none. Starts or
+## stops the second connection; the first is left alone.
+func set_second(address: String) -> void:
+	if address == _hosts[1] or not _threads[0]:
+		return
+	_stop_link(1)
+	if not address.is_empty():
+		_start_link(1, address)
+
+func second() -> String:
+	return _hosts[1]
+
+func _start_link(link: int, address: String) -> void:
+	_hosts[link] = address
+	_link_running[link] = true
+	_threads[link] = Thread.new()
+	_threads[link].start(_run.bind(link))
+
+func _stop_link(link: int) -> void:
+	_link_running[link] = false
+	if _threads[link]:
+		_threads[link].wait_to_finish()
+	_threads[link] = null
+	_hosts[link] = ""
+	_link_connected[link] = false
 
 func stop() -> void:
-	_running = false
-	if _thread:
-		_thread.wait_to_finish()
-	_thread = null
+	_stop_link(1)
+	_stop_link(0)
 	host = ""
 	port = 0
-	_connected = false
 	_last_map_at = 0.0
 	newest_frame = 0
 	_mutex.lock()
@@ -78,20 +114,46 @@ func stop() -> void:
 	_mutex.unlock()
 
 func is_active() -> bool:
-	return _thread != null
+	return _threads[0] != null
 
 func is_connected_to_meteor() -> bool:
-	return _connected
+	return _link_connected[0] or _link_connected[1]
+
+## Seconds since the last map arrived, or since connecting when none has yet;
+## 0 while not connected. `flowing`: a map has arrived over these connections.
+func silent_for() -> float:
+	return silence(_now(), _last_map_at, _connected_since())
+
+func maps_flowing() -> bool:
+	return is_connected_to_meteor() and _last_map_at > _connected_since()
+
+# When the longer-standing of the connections there are was made; INF for none.
+func _connected_since() -> float:
+	var connected_at := INF
+	for link in 2:
+		if _link_connected[link]:
+			connected_at = minf(connected_at, _link_connected_at[link])
+	return connected_at
+
+static func silence(now: float, last_map_at: float, connected_at: float) -> float:
+	if connected_at == INF:
+		return 0.0
+	return maxf(now - maxf(last_map_at, connected_at), 0.0)
 
 ## True while maps are arriving, or a fresh connection is still within its
 ## grace period for the first one.
 func is_delivering() -> bool:
-	if not _connected:
+	if not is_connected_to_meteor():
 		return false
+	# Since the longer-standing of the connections there are.
+	var connected_at := INF
+	for link in 2:
+		if _link_connected[link]:
+			connected_at = minf(connected_at, _link_connected_at[link])
 	var now := _now()
-	if _last_map_at > _connected_at:
+	if _last_map_at > connected_at:
 		return now - _last_map_at < STALL_SEC
-	return now - _connected_at < FIRST_MAP_GRACE_SEC
+	return now - connected_at < FIRST_MAP_GRACE_SEC
 
 ## The map for `target` (a Moonlight frame number) if it has arrived, else the
 ## newest one before it. Never a map from a later frame, unless target is 0
@@ -115,21 +177,22 @@ static func _new_peer(address: String):
 		return ClassDB.instantiate("NightfallTcpPeer")
 	return StreamPeerTCP.new()
 
-func _run() -> void:
+func _run(link: int) -> void:
+	var address := _hosts[link]
 	var peer = null
 	var cipher = null
 	var counter := 0
 	var buf := PackedByteArray()
 	var retry_at := 0.0
-	while _running:
+	while _link_running[link]:
 		var now := _now()
 		if peer == null:
 			if now < retry_at:
 				OS.delay_msec(50)
 				continue
 			retry_at = now + RECONNECT_SEC
-			peer = _new_peer(host)
-			if peer.connect_to_host(host, port) != OK:
+			peer = _new_peer(address)
+			if peer.connect_to_host(address, port) != OK:
 				peer = null
 				continue
 		peer.poll()
@@ -140,9 +203,9 @@ func _run() -> void:
 		if status != StreamPeerTCP.STATUS_CONNECTED:
 			peer = null
 			buf = PackedByteArray()
-			_connected = false
+			_link_connected[link] = false
 			continue
-		if not _connected:
+		if not _link_connected[link]:
 			peer.set_no_delay(true)
 			cipher = ClassDB.instantiate("MeteorChannelCipher")
 			var err: String = cipher.init(key, KDF_INFO)
@@ -154,8 +217,8 @@ func _run() -> void:
 				peer = null
 				continue
 			counter = 0
-			_connected_at = now
-			_connected = true
+			_link_connected_at[link] = now
+			_link_connected[link] = true
 		var available: int = peer.get_available_bytes()
 		if available <= 0:
 			OS.delay_usec(IDLE_USEC)
@@ -165,7 +228,7 @@ func _run() -> void:
 			peer.disconnect_from_host()
 			peer = null
 			buf = PackedByteArray()
-			_connected = false
+			_link_connected[link] = false
 			continue
 		var chunk: PackedByteArray = result[1]
 		buf.append_array(chunk)
@@ -176,7 +239,7 @@ func _run() -> void:
 			peer.disconnect_from_host()
 			peer = null
 			buf = PackedByteArray()
-			_connected = false
+			_link_connected[link] = false
 			continue
 		var consumed := 0
 		var forged := false
@@ -200,37 +263,48 @@ func _run() -> void:
 				"width": message["width"],
 				"height": message["height"],
 				"latency_us": message["latency_us"],
-			})
+			}, link)
 		if forged:
 			push_warning("Meteor depth: a map didn't decrypt; reconnecting")
 			peer.disconnect_from_host()
 			peer = null
 			buf = PackedByteArray()
-			_connected = false
+			_link_connected[link] = false
 			continue
 		if consumed > 0:
 			buf = buf.slice(consumed)
 	if peer:
 		peer.disconnect_from_host()
-	_connected = false
+	_link_connected[link] = false
 
-func _store(entry: Dictionary) -> void:
+## Whether a map is the late copy of one already kept: with two connections
+## each map comes twice. `newest` and `newest_epoch` are the last map kept.
+static func is_late_copy(frame: int, epoch: int, newest: int, newest_epoch: int, two_connections: bool) -> bool:
+	return two_connections and epoch == newest_epoch and frame <= newest and newest - frame < LATE_FRAMES
+
+func _store(entry: Dictionary, link: int = 0) -> void:
 	var now := _now()
+	_mutex.lock()
+	if not _ring.is_empty():
+		var last: Dictionary = _ring[-1]
+		if is_late_copy(entry["frame"], entry["epoch"], last["frame"], last["epoch"], not _hosts[1].is_empty()):
+			_mutex.unlock()
+			return
+		# A new stream epoch starts its frame numbers again.
+		if entry["epoch"] != last["epoch"] or entry["frame"] < last["frame"]:
+			_ring.clear()
 	if _last_map_at > 0.0 and now - _last_map_at >= 0.1:
 		push_warning("[METEOR-DEPTH] Receive gap %.0f ms before frame %d (previous %d)" % [
 			(now - _last_map_at) * 1000.0, entry["frame"], newest_frame])
-	_mutex.lock()
-	# A new stream epoch starts its frame numbers again.
-	if not _ring.is_empty() and (entry["epoch"] != _ring[-1]["epoch"] or entry["frame"] < _ring[-1]["frame"]):
-		_ring.clear()
 	_ring.append(entry)
 	while _ring.size() > RING_SIZE:
 		_ring.pop_front()
-	_mutex.unlock()
 	maps_received += 1
+	maps_by_link[link] += 1
 	newest_frame = entry["frame"]
 	host_latency_ms = entry["latency_us"] / 1000.0
 	_last_map_at = now
+	_mutex.unlock()
 
 ## The complete messages at the start of buf, each {frame, epoch, width,
 ## height, latency_us, header_start, payload_start, payload_end} (the payload

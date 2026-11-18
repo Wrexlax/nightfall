@@ -8,6 +8,16 @@ uniform bool depth_bottom_first = false;
 // stereo_mode 5's joint bilateral depth upsample.
 uniform sampler2D depth_guide_texture : hint_default_black, filter_linear;
 uniform int stereo_mode = 0;
+// Steam Frame curved screen: when true, AI 3D / Meteor depth uses the same
+// once-per-frame passes as the flat composition shader (yuv_display_core):
+// depth_estimator.gd's upsampled_depth_texture + offset_texture, so the curve
+// shows exactly what Flat does. False keeps this shader's own single-pass
+// fallback warp for devices without composition layers.
+uniform bool use_prepass = false;
+uniform sampler2D upsampled_depth_texture : hint_default_white, filter_linear;
+uniform sampler2D offset_texture : hint_default_white, filter_linear;
+uniform float mode5_parallax = 0.006;
+uniform int warp_newton_steps = 2;
 uniform float convergence = 0.5;
 uniform float balance_shift = 0.5;
 uniform int filter_mode = 0;
@@ -20,6 +30,8 @@ uniform int yuv_mode = 0;
 uniform int color_matrix_type = 1;
 uniform int color_range = 0;
 uniform float blur_scale = 1.0;
+// Steam Frame: cheaper minification filter, see footprint_stream_fast().
+uniform bool footprint_fast = false;
 
 uniform vec4 uv_region = vec4(0.0, 0.0, 1.0, 1.0);
 uniform vec2 tile_inset = vec2(0.002);
@@ -41,7 +53,13 @@ vec3 apply_picture(vec3 c) {
 }
 #endif
 
-vec3 yuv_to_rgb(vec2 uv) {
+// The video's own values at uv, as stored: Y, U, V (or RGB, see below).
+vec3 yuv_fetch(vec2 uv) {
+	// RGB passthrough (Android GLES SurfaceTexture path: already-converted RGB
+	// in tex_y, no chroma planes) - matches yuv_display_core.gdshaderinc.
+	if (color_matrix_type == 3) {
+		return texture(tex_y, uv).rgb;
+	}
 	float y_raw = texture(tex_y, uv).r;
 	float u_raw = 0.5;
 	float v_raw = 0.5;
@@ -62,7 +80,17 @@ vec3 yuv_to_rgb(vec2 uv) {
 		u_raw = texture(tex_u, uv).r;
 		v_raw = texture(tex_v, uv).r;
 	}
+	return vec3(y_raw, u_raw, v_raw);
+}
 
+// yuv_fetch()'s values as display-encoded RGB.
+vec3 yuv_convert(vec3 raw) {
+	if (color_matrix_type == 3) {
+		return raw;
+	}
+	float y_raw = raw.x;
+	float u_raw = raw.y;
+	float v_raw = raw.z;
 	float y, u, v;
 
 	if (color_range == 0) {
@@ -94,8 +122,19 @@ vec3 yuv_to_rgb(vec2 uv) {
 	return rgb;
 }
 
+vec3 yuv_to_rgb(vec2 uv) {
+	return yuv_convert(yuv_fetch(uv));
+}
+
 vec3 srgb_to_linear(vec3 c) {
-	return pow(c, vec3(2.2));
+	// Exact sRGB curve (not a plain 2.2 power, which made dark greys darker
+	// than the flat composition layer shows them).
+	// Steam Frame testing: a plain 2.2 power came out a little darker than
+	// the flat layer and the exact sRGB curve a little brighter, so use the
+	// midpoint of the two.
+	c = clamp(c, vec3(0.0), vec3(1.0));
+	vec3 exact = mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), c));
+	return mix(exact, pow(c, vec3(2.2)), 0.5);
 }
 
 vec2 to_frame_uv(vec2 t) {
@@ -111,6 +150,11 @@ vec2 clamp_to_region(vec2 f) {
 vec3 sample_stream(vec2 uv) {
 	uv = clamp_to_region(uv);
 	if (yuv_mode > 0) {
+		// RGB passthrough (cmt 3) is already display-encoded like main_texture's
+		// path; the extra linearize made greys go black on the Steam Frame.
+		if (color_matrix_type == 3) {
+			return yuv_to_rgb(uv);
+		}
 		return srgb_to_linear(yuv_to_rgb(uv));
 	}
 	return texture(main_texture, uv).rgb;
@@ -201,6 +245,70 @@ float bilateral_depth(vec2 uv, out float dlo, out float dhi) {
 	return num / max(den, 1e-6);
 }
 
+// Footprint-aware supersampling (Steam Frame mesh screen): average up to 4x4
+// taps across this pixel's footprint in the stream texture, so a 4K desktop
+// drawn smaller than 4K doesn't alias text. fp = fwidth(uv) from fragment().
+// Steam Frame, In-Scene Picture: Fast. The full version below reads the video
+// up to 16 times per pixel and turns each reading into colour (two or three
+// texture reads and six pow() each). At 3408x3408 per eye that took a screen
+// drawn in the scene past the 72 fps frame budget (5k log: 14.5 ms of GPU
+// time looking at the screen, 5.6 ms looking away). This one takes at most
+// four readings of the brightness plane, placed so bilinear filtering covers
+// the same footprint, reads the colour planes once and converts once.
+//
+// Two things here were each tried the other way and measured:
+// - The colour planes are read once, at the middle (they hold half the detail
+//   of the brightness plane to begin with). Reading them at every tap (5l,
+//   5m, 5r) cost about 3 ms a frame on the headset looking at the screen
+//   (5r log: 11.2 ms against 5n's 8.0) and dropped it below 72 fps.
+// - The conversion uses srgb_to_linear(), the same curve as the full filter.
+//   A polynomial in its place (5n to 5q) saved nothing measurable and drew
+//   dark tones up to four 8-bit steps too dark: shadows on a curved screen
+//   looked harsher than on a flat one.
+vec3 footprint_stream_fast(vec2 uv, vec2 fp) {
+	vec2 ts = (yuv_mode > 0) ? vec2(textureSize(tex_y, 0)) : vec2(textureSize(main_texture, 0));
+	vec2 texels = fp * ts;
+	int nx = (texels.x > 1.0) ? 2 : 1;
+	int ny = (texels.y > 1.0) ? 2 : 1;
+	vec3 sum = vec3(0.0);
+	for (int iy = 0; iy < 2; iy++) {
+		if (iy >= ny) { break; }
+		for (int ix = 0; ix < 2; ix++) {
+			if (ix >= nx) { break; }
+			vec2 off = (vec2(float(ix), float(iy)) + 0.5) / vec2(float(nx), float(ny)) - 0.5;
+			vec2 at = clamp_to_region(uv + off * fp);
+			// Brightness (or the whole colour when there are no colour
+			// planes) from each reading.
+			sum += (yuv_mode > 0) ? texture(tex_y, at).rgb : texture(main_texture, at).rgb;
+		}
+	}
+	vec3 mean = sum / float(nx * ny);
+	if (yuv_mode == 0 || color_matrix_type == 3) {
+		return mean;
+	}
+	return srgb_to_linear(yuv_convert(vec3(mean.r, yuv_fetch(clamp_to_region(uv)).yz)));
+}
+
+vec3 footprint_stream(vec2 uv, vec2 fp) {
+	if (footprint_fast) {
+		return footprint_stream_fast(uv, fp);
+	}
+	vec2 ts = (yuv_mode > 0) ? vec2(textureSize(tex_y, 0)) : vec2(textureSize(main_texture, 0));
+	vec2 texels = fp * ts;
+	int nx = int(clamp(ceil(texels.x), 1.0, 4.0));
+	int ny = int(clamp(ceil(texels.y), 1.0, 4.0));
+	vec3 sum = vec3(0.0);
+	for (int iy = 0; iy < 4; iy++) {
+		if (iy >= ny) { break; }
+		for (int ix = 0; ix < 4; ix++) {
+			if (ix >= nx) { break; }
+			vec2 off = (vec2(float(ix), float(iy)) + 0.5) / vec2(float(nx), float(ny)) - 0.5;
+			sum += sample_stream(uv + off * fp);
+		}
+	}
+	return sum / float(nx * ny);
+}
+
 vec3 filtered_stream(vec2 uv) {
 	vec3 original = sample_stream(uv);
 
@@ -247,9 +355,14 @@ void fragment() {
 	}
 
 	vec2 uv = to_frame_uv(tile_uv);
+	vec2 uv_fp = fwidth(uv);
 
 	if (stereo_mode == 0 || stereo_mode == 1 || stereo_mode == 2) {
-		ALBEDO = apply_picture(filtered_stream(uv));
+		if (filter_mode == 0 && sharpen <= 0.0) {
+			ALBEDO = apply_picture(footprint_stream(uv, uv_fp));
+		} else {
+			ALBEDO = apply_picture(filtered_stream(uv));
+		}
 	}
 	else if (stereo_mode == 3 || stereo_mode == 4) {
 		vec2 depth_texel = 1.0 / vec2(textureSize(depth_texture, 0));
@@ -293,6 +406,46 @@ void fragment() {
 
 		vec2 src_uv = vec2(clamp(uv.x - shift * eye_sign, 0.0, 1.0), uv.y);
 		ALBEDO = apply_picture(filtered_stream(src_uv));
+	}
+	else if (use_prepass && (stereo_mode == 5 || stereo_mode == 6 || stereo_mode == 10 || stereo_mode == 11)) {
+		// Same gather as yuv_display_core.gdshaderinc (see the comments there),
+		// with the eye taken from VIEW_INDEX instead of eye_index.
+		float low_res_width = float(textureSize(upsampled_depth_texture, 0).x);
+		float parallax = mode5_parallax;
+		float disp_texels = parallax * low_res_width;
+		int reach = int(ceil(abs(disp_texels) * max(convergence, 1.0 - convergence))) + 2;
+		vec2 enc = texture(offset_texture, tile_uv).rg;
+		bool is_left = (int(VIEW_INDEX) == 0);
+		float eye_off = (is_left ? enc.r : enc.g) - 0.5;
+		float tc_x = tile_uv.x + eye_off * 2.0 * float(reach) / low_res_width;
+		float disparity = is_left ? parallax : -parallax;
+		float h = 1.0 / low_res_width;
+		for (int i = 0; i < 2; i++) {
+			if (i >= warp_newton_steps) {
+				break;
+			}
+			float d0 = texture(upsampled_depth_texture, vec2(tc_x, tile_uv.y)).r;
+			float dm = texture(upsampled_depth_texture, vec2(tc_x - h, tile_uv.y)).r;
+			float dp = texture(upsampled_depth_texture, vec2(tc_x + h, tile_uv.y)).r;
+			float e = (tc_x - tile_uv.x) + disparity * (d0 - convergence);
+			float slope = 1.0 + disparity * (dp - dm) / (2.0 * h);
+			if (abs(slope) < 0.25) {
+				slope = 0.25;
+			}
+			tc_x -= clamp(e / slope, -4.0 * h, 4.0 * h);
+		}
+		vec2 src_uv = to_frame_uv(vec2(clamp(tc_x, 0.0, 1.0), tile_uv.y));
+		ALBEDO = apply_picture(footprint_stream(src_uv, uv_fp));
+	}
+	else if (use_prepass && stereo_mode == 7) {
+		// Depth map: same as the flat shader (precomputed upsampled depth,
+		// which the upsample pass leaves upright - see yuv_display_core).
+		float d = texture(upsampled_depth_texture, tile_uv).r;
+		ALBEDO = heatmap(d);
+	}
+	else if (use_prepass && stereo_mode == 8) {
+		float d = texture(depth_texture, depth_coord(tile_uv)).r;
+		ALBEDO = heatmap(d);
 	}
 	else if (stereo_mode == 5 || stereo_mode == 6 || stereo_mode == 10 || stereo_mode == 11) {
 		// Joint-bilateral-upsampled, occlusion-aware warp (MiDaS-GPU path).

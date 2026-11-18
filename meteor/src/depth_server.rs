@@ -119,7 +119,10 @@ fn serve(mut stream: TcpStream, peer: SocketAddr, depth: &Depth, key: &MeteorKey
         };
         last_seq = map.seq;
         // Only this client's own video (or anyone's, for a local test client).
-        if !(ip.is_loopback() || map.client == Some(ip)) {
+        // A client's second connection, over its second link, comes from another
+        // address than its video does: it gets the same maps (0.9.0-sf10 let that
+        // connection in and then sent it nothing, because of this test).
+        if !(ip.is_loopback() || for_this_client(map.client, ip, crate::proxy::first_ip_of(ip, crate::proxy::now_ms()))) {
             continue;
         }
         let encode_start = Instant::now();
@@ -146,6 +149,13 @@ fn serve(mut stream: TcpStream, peer: SocketAddr, depth: &Depth, key: &MeteorKey
         last_sent = Some((sent_at, map.done, map.seq));
         sent += 1;
     }
+}
+
+/// Whether a map made from `client`'s video goes to the connection from
+/// `ip`: that client's own address, or the address of its second link
+/// (`first` is the client that address belongs to, by its pings).
+fn for_this_client(client: Option<IpAddr>, ip: IpAddr, first: Option<IpAddr>) -> bool {
+    client.is_some() && (client == Some(ip) || client == first)
 }
 
 struct Subscribed<'a>(&'a Depth);
@@ -260,6 +270,18 @@ mod tests {
 
     /// A fixed vector for the headset's decryption (nightfall-stream's
     /// MeteorCipher): the payload of message 0 for the map below.
+    #[test]
+    fn maps_go_to_both_of_a_clients_addresses_and_to_nobody_else() {
+        let wifi: IpAddr = "198.51.100.7".parse().unwrap();
+        let adapter: IpAddr = "198.51.100.200".parse().unwrap();
+        let stranger: IpAddr = "198.51.100.9".parse().unwrap();
+        assert!(for_this_client(Some(wifi), wifi, None));
+        assert!(for_this_client(Some(wifi), adapter, Some(wifi)));
+        assert!(!for_this_client(Some(wifi), adapter, None));
+        assert!(!for_this_client(Some(wifi), stranger, Some(stranger)));
+        assert!(!for_this_client(None, wifi, None));
+    }
+
     #[test]
     fn known_depth_message() {
         let (_, ours, _) = keys();

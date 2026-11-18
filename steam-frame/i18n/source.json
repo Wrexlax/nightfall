@@ -1,0 +1,742 @@
+[
+[
+"Menu & Keyboard Position",
+"title"
+],
+[
+"Screen Position",
+"title"
+],
+[
+"View & Feel",
+"title"
+],
+[
+"At Launch",
+"label"
+],
+[
+"Buttons",
+"label"
+],
+[
+"Camera FPS Limit",
+"label"
+],
+[
+"Color",
+"label"
+],
+[
+"Confirm Commands",
+"label"
+],
+[
+"Controller Models",
+"label"
+],
+[
+"Cursor Follow",
+"label"
+],
+[
+"Cursor Off Screen",
+"label"
+],
+[
+"Curved Filter",
+"label"
+],
+[
+"Emulate",
+"label"
+],
+[
+"Faster Voice Typing",
+"label"
+],
+[
+"Flat Screen",
+"label"
+],
+[
+"Flat Screen Detail",
+"label"
+],
+[
+"Foveation",
+"label"
+],
+[
+"Game Controller",
+"label"
+],
+[
+"Gamepad Layout",
+"label"
+],
+[
+"Glow Size",
+"label"
+],
+[
+"Glow Strength",
+"label"
+],
+[
+"Head Lock",
+"label"
+],
+[
+"Icon Backdrop",
+"label"
+],
+[
+"Keyboard Mic Key",
+"label"
+],
+[
+"Menu & Keyboard Follow",
+"label"
+],
+[
+"Original Default",
+"label"
+],
+[
+"Pointer Ray",
+"label"
+],
+[
+"Recenter",
+"label"
+],
+[
+"Reconnect Stream",
+"label"
+],
+[
+"Require 'Nightfall'",
+"label"
+],
+[
+"Save As Default",
+"label"
+],
+[
+"Screen Size",
+"label"
+],
+[
+"Speech Model",
+"label"
+],
+[
+"Start Distance",
+"label"
+],
+[
+"Stream Link",
+"label"
+],
+[
+"Vibration",
+"label"
+],
+[
+"Voice Commands",
+"label"
+],
+[
+"Add screen lighting using a fixed, slowly sampled, or live sampled color.",
+"tooltip"
+],
+[
+"Bring the screen, menu and keyboard in front of where you're looking now. Also a button action (Buttons tab), or say 'recenter' with voice typing.",
+"tooltip"
+],
+[
+"Choose the fixed ambient color. Available in Static mode only.",
+"tooltip"
+],
+[
+"Choose what each Steam Frame controller button does.",
+"tooltip"
+],
+[
+"Choose which controls are sent to the PC. Gamepad needs a gamepad driver for Sunshine (such as ViGEmBus); Keyboard+Mouse works without one.",
+"tooltip"
+],
+[
+"Choose which of the PC's monitors to show, and add virtual ones.",
+"tooltip"
+],
+[
+"Circle or Pointer: Nightfall draws its own cursor. PC Cursor: no VR cursor - the PC's own cursor follows your pointer instead.",
+"tooltip"
+],
+[
+"Click Twice: pull the trigger twice quickly. Trigger + Grip: squeeze both together for one double-click.",
+"tooltip"
+],
+[
+"Clicks: a light controller tick when you click something, and a stronger one when you grab. Clicks + Hover: also a faint tick as the pointer moves onto a button or key.",
+"tooltip"
+],
+[
+"Drag across to darken your surroundings in passthrough so the screen stands out. 100% is black.",
+"tooltip"
+],
+[
+"Drag across to make the screen smaller or larger. Dragging a corner of the screen does the same; this also brings back a screen that has grown out of reach.",
+"tooltip"
+],
+[
+"Drag across to set how bright the ambient glow is. Default 50%.",
+"tooltip"
+],
+[
+"Drag across to set how far away the screen starts when Nightfall opens (At Launch: In Front). The screen moves there when you let go, so you can see it. Default 6 m.",
+"tooltip"
+],
+[
+"Drag across to set how far the ambient glow reaches. Default 35%.",
+"tooltip"
+],
+[
+"Drag across to set how much the screen curves. Far left is flat.",
+"tooltip"
+],
+[
+"Drag across to set the stream's volume. All the way left mutes it; boosts above Normal softly limit loud peaks.",
+"tooltip"
+],
+[
+"Experimental. What you aren't looking at is drawn less finely. It follows your eyes.\nOnly affects a curved or 3D Scene screen. A flat Layer screen is unchanged, and Off is faster.",
+"tooltip"
+],
+[
+"For a flat Layer screen. Stream Size draws its picture at the stream's own size. Full always draws\nit at 4K, as older builds did: much heavier with AI 3D, and kept so the two can be compared.",
+"tooltip"
+],
+[
+"Forget your saved spots and go back to Nightfall's own default spots for the menu and keyboard.",
+"tooltip"
+],
+[
+"How a curved (or 3D Scene) screen is smoothed where it is shown smaller than the video.\nFast: lighter on the headset. Full: the original, a touch finer on small text.",
+"tooltip"
+],
+[
+"How a flat screen is drawn. Layer: handed to SteamVR to draw. 3D Scene: drawn by Nightfall like the curved screen, so controllers show in front of it.",
+"tooltip"
+],
+[
+"In Front: the screen starts in front of you each time. Same Spot: it starts where it was last time, in your room (for a fixed setup).",
+"tooltip"
+],
+[
+"The screen stays where you put it. Level keeps it upright in front of you wherever you look;\nTilt also tilts it with your head. Place the screen first: you can still grab it afterwards.",
+"tooltip+"
+],
+[
+"Move the PC's mouse cursor to the right edge, out of the way. Over a full-screen video, the player then hides it. Click on the screen to bring it back.",
+"tooltip"
+],
+[
+"Off: the PC's cursor only moves when you click. Standard: it follows your pointer.\nCapacitive Touch: uses capacitive touch to enable/disable VR control of the PC cursor.",
+"tooltip"
+],
+[
+"On: a short popup says what each voice command did. Off: commands run silently.",
+"tooltip"
+],
+[
+"On: commands only run when you start with 'Nightfall' (for example 'Nightfall select all'). Use this if commands go off by accident. Off: just say the command; 'Nightfall' first still works.",
+"tooltip"
+],
+[
+"On: moving the screen with its grab bar brings the menu and keyboard along. Their own grab bars still move just them. Off: they move separately.",
+"tooltip"
+],
+[
+"Picture and sound over Wi-Fi and the wireless adapter at once; the first copy to arrive is used.\nThe steadiest. Needs the adapter and Meteor on the PC; can also be chosen in Meteor's menu.",
+"tooltip"
+],
+[
+"Remember where the menu and keyboard are now (relative to you) as their default spots. A long press on their grab bars puts them back there.",
+"tooltip"
+],
+[
+"Restarts the stream, to get sound or depth back if either has stopped coming through.",
+"tooltip"
+],
+[
+"Send the headset microphone to the PC through Nightfall Meteor, for voice chat and calls. Needs VB-CABLE installed on the PC.",
+"tooltip"
+],
+[
+"Show every voice command. Say a command on its own (not inside a sentence) while voice typing.",
+"tooltip"
+],
+[
+"Show or hide the beam from your controller to the screen.",
+"tooltip"
+],
+[
+"Show or hide the frame around the screen. A curved screen has no frame.",
+"tooltip"
+],
+[
+"Show your real Steam Frame controllers in Nightfall, using SteamVR's own models.",
+"tooltip"
+],
+[
+"Standard: as labelled. Swapped: A/B and X/Y trade places. Custom: your own layout (Buttons tab > Custom Gamepad).",
+"tooltip"
+],
+[
+"The amount of stabilization applied to the pointer. Adaptive steadies more the slower you move.",
+"tooltip"
+],
+[
+"The dark panel behind the icons under the screen. Off: the icons float on their own and are fainter.",
+"tooltip"
+],
+[
+"The stream's frame rate, and the headset's display rate with it (72, 90, 120 or 144).\nLower is lighter and cooler. With a camera add-on, Passthrough holds it at 90 (see Advanced).",
+"tooltip"
+],
+[
+"Use the controllers as a gamepad or keyboard and mouse for games. If a game doesn't react, Alt+Tab to it once. If the desktop doesn't react after turning this off, Alt+Tab once.",
+"tooltip"
+],
+[
+"What the Mic key on Nightfall's keyboard does. Nightfall: voice typing on the headset (tap to start and stop, or hold while talking). Windows: opens Windows dictation (Win+H).",
+"tooltip"
+],
+[
+"Which speech model voice typing listens with. Small hears words more correctly and takes longer to type them out; Base is quicker.",
+"tooltip"
+],
+[
+"While your words are being worked out, the headset's depth model slows right down so the\ntext comes sooner. The 3D depth trails for those seconds. Only with Headset: Detail or Light.",
+"tooltip"
+],
+[
+"With AI 3D on, nudges the drawn cursor left or right so it lines up with where your clicks land. It moves the cursor you see, not the click.",
+"tooltip"
+],
+[
+"With a color camera add-on: 90 fps while Passthrough is on, so head turns don't hitch.\nAuto: only while the color camera is the one showing the room. On: whenever it is fitted.",
+"tooltip"
+],
+[
+"Align on-headset depth edges to colour. Meteor uses server controls.",
+"tooltip*"
+],
+[
+"Audio Output",
+"label*"
+],
+[
+"Codec",
+"label*"
+],
+[
+"Compare Native / AudioTrack playback; reconnects. Test with Volume: Normal.",
+"tooltip*"
+],
+[
+"Contour Cleanup",
+"label*"
+],
+[
+"Diagnostics",
+"title*"
+],
+[
+"Edge Alignment",
+"label*"
+],
+[
+"Gamma",
+"label*"
+],
+[
+"Licences",
+"label*"
+],
+[
+"Microphone",
+"label*"
+],
+[
+"Passthrough",
+"label*"
+],
+[
+"Screens",
+"label*"
+],
+[
+"Smooth depth contours. Requires Edge Alignment.",
+"tooltip*"
+],
+[
+"Volume",
+"label*"
+],
+[
+"The stream's sound is muted in Nightfall. Press to unmute.",
+"tooltip+"
+],
+[
+"How hard the headset works on AI depth: Auto picks for you, Fast is lighter and smoother, Standard gives better depth but costs more.",
+"tooltip+"
+],
+[
+"For depth made on the headset: run the AI model on the headset's CPU, or on its graphics chip (GPU, via Vulkan). Not used when Nightfall Meteor makes the depth on your PC.",
+"tooltip+"
+],
+[
+"For depth made on the headset: choose whether the headset's graphics chip favours the video stream or the AI depth model.",
+"tooltip+"
+],
+[
+"Which depth sits right on the screen. Lower: more of the picture pops out toward you. Higher: more of it sits behind the screen.",
+"tooltip+"
+],
+[
+"How strong the 3D is. Default 75%.\nHigher pushes near and far further apart, but edges stretch more.",
+"tooltip+"
+],
+[
+"Sets which part of the picture sits on the screen's surface. Default 50%.\nLower: more comes out toward you. Higher: more sinks in behind the screen.",
+"tooltip+"
+],
+[
+"How many virtual monitors to add. Windows decides where a new one sits on its desktop:\narrange it once in Windows' Display settings and it is remembered.",
+"tooltip+"
+],
+[
+"On: the screens sit in a grid and move as one. Off: each screen can be grabbed and placed on\nits own, and moving the main screen still brings the others along.",
+"tooltip+"
+],
+[
+"Where the 3D depth is made: on your PC by Nightfall Meteor, or on the headset by one of three models.",
+"tooltip+"
+],
+[
+"Save the current buttons under this name.",
+"tooltip+"
+],
+[
+"Picture and sound over Wi-Fi alone; the wireless adapter is not used.\nCan also be chosen in Meteor's menu on the PC.",
+"tooltip+"
+],
+[
+"Picture and sound over the adapter alone while its signal holds. If it is lost the stream moves\nto Wi-Fi by itself, and back when the adapter returns. Can also be chosen in Meteor's menu.",
+"tooltip+"
+],
+[
+"Stream Link needs Nightfall Meteor on your PC, and this stream isn't going through Meteor.\nStart Meteor on the PC, then reconnect. Until then the stream is over Wi-Fi alone.",
+"tooltip+"
+],
+[
+"Depth made on the headset's processor with the finer model. The slowest of the three headset\nchoices and the heaviest on the processor; voice typing takes longer while it runs.",
+"tooltip+"
+],
+[
+"Depth made on the headset's graphics chip: about as fine as Detail and twice as quick, and it\nleaves the processor free for voice typing. Drawing frames takes priority over refreshing depth.",
+"tooltip+"
+],
+[
+"Depth made on the headset's processor with a small, fast model: coarser depth, the least work\nof the three headset choices.",
+"tooltip+"
+],
+[
+"Depth made on your PC by Nightfall Meteor and sent with the picture: the sharpest, and the\nlightest on the headset. Press to change to a model that runs on the headset itself.",
+"tooltip+"
+],
+[
+"Where the depth comes from. This build makes none on the headset,\nso it needs Nightfall Meteor on your PC.",
+"tooltip+"
+],
+[
+"Meteor on your PC isn't offering depth: \"Host depth\" is switched off in its menu, or still loading.\nUntil it is, depth is made on the headset. Press to change between the headset's models.",
+"tooltip+"
+],
+[
+"How often the headset's depth model runs. Auto starts at 20 and slows when frames run late.\nLower is cooler, with steadier frames and typing. Detail can't keep up above about 15.",
+"tooltip+"
+],
+[
+"The screen stays upright in front of you wherever you look, following smoothly.\nYou can still grab it to move it. By voice: 'head lock on', 'head lock off'.",
+"tooltip+"
+],
+[
+"The screen stays in front of you and tilts with your head, for lying down.\nYou can still grab it to move it. By voice: 'head lock tilt', 'head lock off'.",
+"tooltip+"
+],
+[
+"Welcome to Nightfall (build %s).",
+"notice"
+],
+[
+"Nightfall updated to build %s.",
+"notice"
+],
+[
+"Meteor's depth is off on the PC (its menu: Host depth). Using the headset's.",
+"notice"
+],
+[
+"Meteor's depth is back on. Using it.",
+"notice"
+],
+[
+"Stream Link: %s (chosen on the PC)",
+"notice"
+],
+[
+"Back on the adapter.",
+"notice"
+],
+[
+"Adapter signal lost: streaming over Wi-Fi.",
+"notice"
+],
+[
+"Connect to your PC first.",
+"notice"
+],
+[
+"Connection lost, reconnecting...",
+"notice"
+],
+[
+"Reconnecting %d/%d in %ds...",
+"notice"
+],
+[
+"Reconnecting %d/%d...",
+"notice"
+],
+[
+"%s mode on - the VR cursor and custom buttons are off.\nGame not reacting? Alt+Tab to it. To get the cursor back, turn Game Controller off (menu or grab-bar gamepad button).",
+"notice"
+],
+[
+"Head Lock off: the screen stays where it is.",
+"notice"
+],
+[
+"Head Lock on: the screen follows your view and stays upright.",
+"notice"
+],
+[
+"Head Lock on (Tilt): the screen follows your view and tilts with your head.",
+"notice"
+],
+[
+"The %s speech model isn't installed. Run install.sh again to download it.",
+"notice"
+],
+[
+"Voice typing is busy. Try again in a moment.",
+"notice"
+],
+[
+"Loading depth model…",
+"notice"
+],
+[
+"Applying - restarting stream for new monitor selection...",
+"notice"
+],
+[
+"Virtual monitor(s) will appear on next stream connect",
+"notice"
+],
+[
+"Monitor layout applied",
+"notice"
+],
+[
+"This layout is already saved",
+"notice"
+],
+[
+"Preset saved",
+"notice"
+],
+[
+"Preset removed",
+"notice"
+],
+[
+"Nightfall Meteor didn't answer: no AI 3D this session. Check it's running on the PC, then reconnect.",
+"notice"
+],
+[
+"Meteor's key changed; not using it",
+"notice"
+],
+[
+"Voice typing isn't installed. Run install.sh again to add it.",
+"notice"
+],
+[
+"Voice typing is still loading. Try again in a moment.",
+"notice"
+],
+[
+"Voice typing couldn't load its speech model.",
+"notice"
+],
+[
+"Connect to your PC first, then hold to talk.",
+"notice"
+],
+[
+"Opening the microphone...",
+"notice"
+],
+[
+"Couldn't open the microphone: %s",
+"notice"
+],
+[
+"Listening... tap Mic again when you're done.",
+"notice"
+],
+[
+"Listening... let go when you're done.",
+"notice"
+],
+[
+"Hold the button until it says Listening, then speak.",
+"notice"
+],
+[
+"Hold the button while you speak.",
+"notice"
+],
+[
+"Typing...",
+"notice"
+],
+[
+"Didn't hear anything.",
+"notice"
+],
+[
+"Didn't catch that.",
+"notice"
+],
+[
+"There's no F%d key.",
+"notice"
+],
+[
+"Stream Link needs Nightfall Meteor on your PC. This stream isn't going through Meteor.",
+"notice"
+],
+[
+"Stream Link needs a newer Nightfall Meteor on your PC (0.9.0-sf3 or later).",
+"notice"
+],
+[
+"The PC's wireless adapter isn't answering: streaming over Wi-Fi alone. Still looking for it.",
+"notice"
+],
+[
+"Commands",
+"label"
+],
+[
+"On: a command said on its own while voice typing is carried out.\nOff: nothing you say is run as a command; everything is typed.",
+"tooltip+"
+],
+[
+"Off: nothing you say is run as a command; everything is typed.\nOn: a command said on its own while voice typing is carried out.",
+"tooltip+"
+],
+[
+"Voice & Microphone",
+"title"
+],
+[
+"Already connecting to your PC...",
+"notice"
+],
+[
+"For sharper 3D that is lighter on the headset, install Nightfall Meteor on your PC.\nUntil then the headset's own model is in use. Click this note to hide it for good.",
+"page note"
+],
+[
+"Reset Settings",
+"label"
+],
+[
+"Press again",
+"value"
+],
+[
+"Every setting in the menu goes back to Nightfall's defaults; then Nightfall restarts. Press twice.\nYour paired PCs, button mappings and profiles, language and speech models are kept.",
+"tooltip"
+],
+[
+"Press Reset Settings again to put everything in the menu back to Nightfall's defaults.\nYour paired PCs, button mappings and profiles stay. Nightfall will restart.",
+"notice"
+],
+[
+"Settings are back to Nightfall's defaults. Nightfall is restarting.",
+"notice"
+],
+[
+"Logging",
+"label"
+],
+[
+"On: each run is logged, with a copy cleaned for sharing in Downloads > Nightfall-logs.\nA change takes effect the next time Nightfall starts.",
+"tooltip"
+],
+[
+"Off: nothing is logged. To report a problem: turn it on, restart Nightfall, repeat the problem.\nA change takes effect the next time Nightfall starts.",
+"tooltip"
+],
+[
+"Voice typing hears English only until a multilingual speech model is installed (run install.sh again).",
+"notice"
+],
+[
+"Approve pairing on your PC",
+"title"
+],
+[
+"Pairing request expired",
+"title"
+],
+[
+"On your PC, open the streaming host's web page (Sunshine, Apollo or Vibepollo), find PIN or Clients, and type this PIN.",
+"page note"
+],
+[
+"Nightfall Meteor on your PC is asking: choose Yes in its window.\nNo window? Right-click the Meteor icon by the clock and choose Approve pairing.",
+"page note"
+],
+[
+"A request lasts one minute. Press Back and pair again, or type the PIN on the host's web page.",
+"page note"
+],
+[
+"Logging starts the next time Nightfall starts. Restart Nightfall to log this session's problem.",
+"notice"
+],
+[
+"Logging stops the next time Nightfall starts.",
+"notice"
+]
+]

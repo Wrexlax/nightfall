@@ -1,0 +1,93 @@
+Nightfall for Steam Frame - where it keeps its files
+
+Everything is inside your home folder on the headset (~ below; on the Frame
+that is /home/steamos). Nothing is installed system-wide.
+
+THE APP
+  ~/Games/NightfallFrame/
+      The program, its launcher (nightfall.sh), the installer and
+      uninstaller, the licences and this file. About 180 MB.
+  ~/Games/NightfallFrame/depth_models/
+      The three depth models for AI 3D made on the headset itself (41 MB
+      together). They come with the package; nothing is downloaded.
+  ~/Games/NightfallFrame/logs/
+      One log per launch (the newest 10 are kept). See LOGS below.
+  Steam library: "Nightfall (Steam Frame)", under Non-Steam games
+      A shortcut that starts nightfall.sh. Steam keeps it and its artwork
+      in its own files.
+
+VOICE TYPING (the speech models)
+  ~/.local/share/nightfall/whisper/
+      ggml-base.en.bin     142 MB   Speech Model: Base
+      ggml-small.en.bin    466 MB   Speech Model: Small
+      ggml-base.bin        142 MB   the same two for other languages than
+      ggml-small.bin       466 MB   English (only if you chose them)
+      Downloaded once by the installer from whisper.cpp's model page on
+      huggingface.co and checked before use. Kept outside the app's folder
+      so an update doesn't download them again. Delete the folder to get
+      the space back; voice typing is then off until the installer is run
+      again. What you say is turned into text on the headset and is never
+      sent anywhere or saved.
+
+YOUR SETTINGS AND PAIRINGS
+  ~/.local/share/NightfallFrame/
+      (Before build 8u: ~/.local/share/godot/app_userdata/Nightfall/, which
+      the original Nightfall's Steam Frame build uses as well. Your settings
+      were copied from there once; that folder is left as it was.)
+      app_state.cfg            your settings
+      host_state.cfg           stream settings and screen layouts, per PC
+      last_connection.cfg      the PC you used last
+      button_bindings.cfg, button_profiles.cfg
+                               your buttons and saved profiles
+      monitor_presets_custom.json
+                               screen layouts you saved
+      addons/nightfall-stream/config.ini, meteor_keys.cfg
+                               your saved PCs and this headset's pairing
+                               keys. Treat these like a password: with
+                               them, another device could connect to your
+                               PCs as this headset.
+      Logs and Godot's drawing cache are here too.
+      Delete the folder to start from scratch; each PC then has to be
+      paired again.
+
+LOGS
+  Written only while Advanced Settings > Logging is On (off on a new
+  install; see README.txt). With it off, the one thing kept is
+  ~/Games/NightfallFrame/logs/last-run.txt: when the last run began, when
+  it ended and its exit code.
+  ~/Downloads/Nightfall-logs/
+      The copy to attach to a message or post when asking for help. It is
+      cleaned for sharing while it is written: network addresses, device
+      and pairing ids, keys, PINs and names are masked (192.168.1.50 reads
+      x.x.x.50). share_log.py in the app's folder is the cleaner, and
+      lists everything it masks.
+  ~/Games/NightfallFrame/logs/  and  ~/.local/share/NightfallFrame/logs/
+      The untouched logs, for finding faults on this headset. They hold
+      your PC's address on your home network and the ids the headset and
+      PC use with each other. Nothing in them reaches anyone unless you
+      send the file yourself.
+  ~/Games/nightfall-install.log
+      What the installer did the last time it ran.
+
+OUTSIDE NIGHTFALL'S OWN FOLDERS
+  SteamVR's settings (~/.config/openvr/config/steamvr.vrsettings)
+      The installer adds video settings for Nightfall alone (resolution,
+      refresh rate, motion smoothing off). You can change them in
+      SteamVR's per-application video settings. They stay after an
+      uninstall and do nothing without the app.
+      Nightfall's own FPS setting changes one of them while it runs: the
+      refresh rate, so the headset's display matches the stream.
+
+REMOVING NIGHTFALL
+  uninstall.sh removes the app, its Steam library entry and its logs. It
+  asks separately about the speech models and about your settings and
+  pairings, so you can keep them for a later install.
+  By hand: remove the shortcut in Steam (Manage > Remove non-Steam game
+  from your library) and delete the folders above.
+
+ON YOUR PC
+  Nothing from this package. Each PC you paired with lists this headset
+  among its paired devices (in Sunshine, Apollo or Vibepollo's web page:
+  PIN / Clients); remove it there if you want the PC to forget it.
+  Nightfall Meteor, if you use it, is a separate program with its own
+  uninstaller on the PC.

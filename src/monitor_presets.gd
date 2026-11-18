@@ -43,8 +43,10 @@ static func _default(id: String, screens: Array) -> Dictionary:
 	}
 
 
-# The 8 default presets, verbatim from the spec ([gx,gy] = top-left block of
-# each screen's 2x2 footprint on the 8x4 grid, first entry is always primary).
+# The default presets: upstream's 8, verbatim from the spec ([gx,gy] = top-left
+# block of each screen's 2x2 footprint on the 8x4 grid, first entry is always
+# primary), plus one for a second screen on the left (added on the Steam
+# Frame, 6q: two screens could go right or above, not left).
 # Compiled into the app (const, not loaded from a file) so a runtime bug or a
 # corrupted user:// file can never take these out - see
 # write_default_presets_snapshot() for the separate, non-authoritative,
@@ -57,6 +59,10 @@ static func default_presets() -> Array:
 		_default("default_2_side_by_side", [
 			_screen(true, 2, 1),
 			_screen(false, 4, 1),
+		]),
+		_default("default_2_second_on_left", [
+			_screen(true, 4, 1),
+			_screen(false, 2, 1),
 		]),
 		_default("default_2_stacked", [
 			_screen(true, 3, 2),
@@ -130,6 +136,28 @@ static func all_presets() -> Array:
 	var out := default_presets()
 	out.append_array(load_custom_presets())
 	return out
+
+
+## The id of a preset that is the same grid arrangement as `screens` (each a
+## preset screen entry, primary first), or "" when there is none. Only grid
+## arrangements are compared: freely placed screens are never "the same".
+static func find_same_grid_layout(screens: Array) -> String:
+	for s in screens:
+		if not s.get("grid_mode", false):
+			return ""
+	for preset in all_presets():
+		var theirs: Array = preset.get("screens", [])
+		if theirs.size() != screens.size():
+			continue
+		var same := true
+		for i in screens.size():
+			if not theirs[i].get("grid_mode", false) or theirs[i].get("is_primary", false) != screens[i].get("is_primary", false) \
+					or Array(theirs[i].get("grid_pos", [])) != Array(screens[i].get("grid_pos", [])):
+				same = false
+				break
+		if same:
+			return String(preset.get("id", ""))
+	return ""
 
 
 static func find_preset(id: String) -> Dictionary:

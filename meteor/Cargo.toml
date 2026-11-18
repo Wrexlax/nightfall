@@ -66,6 +66,9 @@ eframe = { version = "=0.33.3", default-features = false, features = ["glow", "d
 
 [target.'cfg(windows)'.dependencies]
 wasapi = "0.25.0"
+# The PC's mute state for the headset's Mute key (media_keys.rs). The same
+# release of `windows` that wasapi already brings in; nothing new to download.
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Media_Audio", "Win32_Media_Audio_Endpoints", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Variant"] }
 
 [target."cfg(unix)".dependencies]
 libc = "0.2"

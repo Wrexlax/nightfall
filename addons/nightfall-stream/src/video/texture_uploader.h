@@ -51,6 +51,9 @@ public:
     void cleanup();
     void update_from_frame(AVFrame *frame);
     void update_from_raw_nv12(int width, int height, const uint8_t *data, uint32_t y_size, uint32_t uv_size);
+    // NV12 with arbitrary row pitch (V4L2 CAPTURE buffers). Copies straight into
+    // the upload buffers; RenderingDevice path only. Returns false if unusable.
+    bool update_from_nv12_strided(int width, int height, const uint8_t *y, int y_pitch, const uint8_t *uv, int uv_pitch);
     void update_from_raw_bgra(int width, int height, const uint8_t *data, uint32_t data_size);
 #ifdef __ANDROID__
     void update_from_android_image(AImage *image, int width, int height);

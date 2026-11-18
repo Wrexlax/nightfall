@@ -18,6 +18,7 @@ class FakeUi extends RefCounted:
 	func update_monitor_tab(): pass
 
 class Fixture extends Node3D:
+	var device_is_steam_frame := false # the Steam Frame port reads this from main
 	var video_presentation := FakePresentation.new()
 	var settings := AppSettings.new()
 	var stream_viewport := SubViewport.new()

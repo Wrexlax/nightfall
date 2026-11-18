@@ -45,10 +45,26 @@ var _layouts: Dictionary = {}
 # saved log without flooding it.
 var _seen_pad_inputs: Dictionary = {}
 
+var _vol_echoes := 0
+
 func _init(owner: Node3D):
 	main = owner
 
 func handle_input(event: InputEvent):
+	# Steam Frame: the headset's own volume buttons arrive here as key events.
+	# Leave them to SteamOS - forwarding them to the PC (and its key repeat)
+	# made the headset volume run all the way up or down.
+	if main.device_is_steam_frame and event is InputEventKey \
+			and event.keycode in [KEY_VOLUMEUP, KEY_VOLUMEDOWN, KEY_VOLUMEMUTE]:
+		# Logged (not repeats) to see whether a single press reaches Nightfall
+		# with a matching release, for the "volume runs away" report.
+		if not event.echo:
+			main._log("[VOLKEY] %s %s" % [OS.get_keycode_string(event.keycode), "down" if event.pressed else "up"])
+		else:
+			_vol_echoes += 1
+			if _vol_echoes % 20 == 1:
+				main._log("[VOLKEY] %s repeating (%d repeats so far)" % [OS.get_keycode_string(event.keycode), _vol_echoes])
+		return
 	if desktop_input_blocked(): return
 	# Physical desktop input takes priority without disabling hand menu access.
 	if (event is InputEventKey and event.pressed) or event is InputEventMouseMotion or event is InputEventMouseButton:
@@ -95,6 +111,12 @@ func handle_input(event: InputEvent):
 
 	if main.is_streaming:
 		if event is InputEventJoypadButton or event is InputEventJoypadMotion:
+			# Steam Frame: Steam also exposes the headset's own controllers as an
+			# SDL gamepad. They're already handled through OpenXR (and Game
+			# Controller mode), so forwarding this copy would put a second,
+			# half-working controller on the PC.
+			if main.device_is_steam_frame and Input.get_joy_name(event.device).begins_with("Steam Frame"):
+				return
 			_handle_pad_event(event)
 			return
 

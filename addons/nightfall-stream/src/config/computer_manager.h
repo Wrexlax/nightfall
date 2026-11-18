@@ -46,6 +46,8 @@ private:
     String server_unique_id;
     String server_cert_pem;
     String pair_mac;
+    // The name the server gives itself in serverinfo (the PC's name).
+    String pair_hostname;
     PackedByteArray client_secret_random;
     PackedByteArray server_challenge;
     PackedByteArray server_secret;
@@ -84,6 +86,7 @@ private:
     // separator). Returns the address unchanged for IPv4/hostnames, which
     // never contain ':'. See docs/plans/active/usb-link-streaming.md Step 3.
     static bool _is_link_local(const String &addr);
+    void _remember_host_name(const Dictionary &host, const String &name);
     // The address to reach a saved host by right now: its USB Link address
     // while the link is up, otherwise its network address.
     static String _host_address(const Dictionary &host);

@@ -85,6 +85,12 @@ public:
     int get_decode_queue_size() const;
     int get_last_frame_latency_us() const;
     int get_network_latency_ms() const;
+    void set_second_link(const String &address);
+    void set_second_link_choice(int choice, int rev);
+    void set_second_link_watch(bool enabled);
+    bool request_keyframe();
+    void set_second_link_control(bool enabled);
+    Dictionary get_second_link_stats() const;
     Dictionary take_performance_stats();
     bool is_display_ready() const;
     String get_codec_capabilities_info() const;
@@ -102,6 +108,9 @@ public:
     // opus: send Opus rather than PCM (when Meteor's offer lists it).
     String start_meteor_mic(const String &host, int port, const String &meteor_key, bool opus);
     void stop_meteor_mic();
+    // Steam Frame: the microphone over the headset's second link as well
+    // ("" for none); see MeteorMic::set_second.
+    String set_meteor_mic_second(const String &host);
     void set_meteor_mic_muted(bool muted);
     // {running, muted, packets, level, error}
     Dictionary get_meteor_mic_status() const;

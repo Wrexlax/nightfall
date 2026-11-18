@@ -3,6 +3,7 @@ extends SceneTree
 const Controls = preload("res://src/composition_screen_controls.gd")
 
 class NativeFixture extends Node3D:
+	var device_is_steam_frame := false # the Steam Frame port reads this from main
 	const SHARPEN_RUNTIME_NORMAL = 5
 	const SHARPEN_RUNTIME_QUALITY = 6
 	var primary_screen: VRScreen

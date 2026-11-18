@@ -1,5 +1,38 @@
 #pragma once
 
+#if defined(NIGHTFALL_FRAME_DEPTH)
+// Steam Frame: its own engine (frame_depth_engine.h), under the name
+// DepthBridge knows its engine by.
+#include "frame_depth_engine.h"
+class MidasDepthEngine : public FrameDepthEngine {};
+#elif defined(NIGHTFALL_NO_TFLITE)
+// A Steam Frame build without LiteRT (steam-frame/build-litert.sh not run):
+// host depth comes from Meteor; this placeholder keeps DepthBridge's Linux
+// code paths compiling and reports that on-headset depth is unavailable.
+#include <cstddef>
+#include <cstdint>
+#include <string>
+#include <vector>
+class MidasDepthEngine {
+public:
+    MidasDepthEngine() {}
+    ~MidasDepthEngine() {}
+    void initialize(const std::string &) {}
+    void submit_frame(const uint8_t *, size_t, int, int) {}
+    std::vector<uint8_t> get_latest_depth() { return {}; }
+    void set_active_model(int) {}
+    int configure(int, int) { return 0; }
+    int get_backend_capabilities(int) const { return 0; }
+    std::string get_backend_status() const { return "On-headset depth is not included in this Steam Frame build; use Meteor"; }
+    float get_last_inference_ms() const { return 0.0f; }
+    float get_last_inference_hz() const { return 0.0f; }
+    float get_last_age_ms() const { return 0.0f; }
+    int get_last_skipped_frames() const { return 0; }
+    int get_model_size() const { return 256; }
+};
+#else
+
+
 // Native (JNI-free) depth estimation for Linux - a direct C++ port of the
 // selectable Android DepthEstimator.java models. Same math/algorithm as the
 // Java version (robustRange/postProcess/temporalSmooth), same async
@@ -226,3 +259,4 @@ private:
 
     bool initialized_ = false;
 };
+#endif // NIGHTFALL_NO_TFLITE

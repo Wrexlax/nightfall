@@ -19,6 +19,8 @@ Collected on 2026-10-08 from the sources the release builds use:
 | `zipdepth.txt` | `tools/ZipDepth/LICENSE` |
 | `noto-cjk.txt` | `src/assets/fonts/NOTO_CJK_LICENSE.txt` |
 | `ncnn.txt` | ncnn's `LICENSE.txt` (Linux builds) |
+| `whisper.cpp.txt` | whisper.cpp v1.9.5's `LICENSE` (Steam Frame build; added 2026-11-17, the same text the package carries as `LICENSE-whisper.cpp.txt`) |
+| `glslang.txt` | glslang's `LICENSE.txt` as ncnn bundles it (Steam Frame build; the package's `LICENSE-glslang.txt`) |
 
 Checked 2026-10-08 against the APK's LiteRT 1.4.2 libraries
 (`libtensorflowlite_jni.so`, `libtensorflowlite_gpu_jni.so`): their own

@@ -28,7 +28,11 @@ static func enabled(args: PackedStringArray, dev_feature: bool, debug_build: boo
 	return dev_feature or debug_build or "--nf-dev-bridge" in args
 
 static func wanted() -> bool:
-	return enabled(OS.get_cmdline_args() + OS.get_cmdline_user_args(), OS.has_feature("nightfall_dev"), OS.is_debug_build())
+	# Steam Frame builds run on Godot's stock debug template, so "debug build"
+	# doesn't mean a developer's build there. The bridge can run code it is
+	# sent (eval), so on the Frame it only starts when asked for explicitly.
+	var debug_build := OS.is_debug_build() and not OS.has_feature("steamframe")
+	return enabled(OS.get_cmdline_args() + OS.get_cmdline_user_args(), OS.has_feature("nightfall_dev"), debug_build)
 
 func _init(owner) -> void:
 	main = owner

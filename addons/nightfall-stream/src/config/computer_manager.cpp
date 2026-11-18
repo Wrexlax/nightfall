@@ -226,6 +226,7 @@ void NightfallComputerManager::_on_pair_request_completed(int code, PackedByteAr
             } else {
                 failed = true;
                 fail_msg = _extract_xml_value(xml, "status_message");
+                NF_LOG("NightfallPair", "Pair step %d refused by host, reply: %s", (int)step, xml.substr(0, 400).utf8().get_data());
                 if (fail_msg.is_empty())
                     fail_msg = "Pairing failed at step " + String::num_int64(step);
             }
@@ -260,6 +261,7 @@ void NightfallComputerManager::_on_pair_request_completed(int code, PackedByteAr
             if (!mac.is_empty() && mac != "00:00:00:00:00:00") {
                 pair_mac = mac;
             }
+            pair_hostname = _extract_xml_value(xml, "hostname");
 
             bool known_and_paired = false;
             if (!server_unique_id.is_empty()) {
@@ -292,6 +294,7 @@ void NightfallComputerManager::_on_pair_request_completed(int code, PackedByteAr
                             update_data["mac"] = pair_mac;
                             config_manager->update_host(h["id"], update_data);
                         }
+                        _remember_host_name(h, pair_hostname);
                         break;
                     }
                 }
@@ -314,6 +317,7 @@ void NightfallComputerManager::_on_pair_request_completed(int code, PackedByteAr
             String plaincert = _extract_xml_value(xml, "plaincert");
             if (plaincert.is_empty()) {
                 String status_msg = _extract_xml_value(xml, "status_message");
+                NF_LOG("NightfallPair", "getservercert refused by host, reply: %s", xml.substr(0, 400).utf8().get_data());
                 pair_state = PAIR_ERROR;
                 if (parent_node_) { parent_node_->call("_on_pair_completed", false, status_msg.is_empty() ? "No server certificate received." : status_msg); }
                 return;
@@ -368,7 +372,12 @@ void NightfallComputerManager::_on_pair_request_completed(int code, PackedByteAr
         }
         case 5: {
             Dictionary host_data;
-            host_data["hostname"] = pair_ip;
+            // "hostname" is only ever shown, never connected to.
+            host_data["hostname"] = pair_hostname.is_empty() ? pair_ip : pair_hostname;
+            String own_name = config_manager->get_host_name(server_unique_id);
+            if (!own_name.is_empty()) {
+                host_data["name"] = own_name;
+            }
             host_data["localaddress"] = pair_ip;
             if (_is_link_local(pair_ip)) {
                 host_data["usb_address"] = pair_ip;
@@ -418,6 +427,15 @@ void NightfallComputerManager::_schedule_retry(int step) {
     }).detach();
 }
 
+// Saves the name a server reports for itself on its host record, where the
+// server list shows it. Never logged: a PC's name can be a person's.
+void NightfallComputerManager::_remember_host_name(const Dictionary &host, const String &name) {
+    if (name.is_empty() || String(host.get("hostname", "")) == name) return;
+    Dictionary update_data;
+    update_data["hostname"] = name;
+    config_manager->update_host(host["id"], update_data);
+}
+
 void NightfallComputerManager::unpair(int host_id) {
     if (!config_manager.is_valid()) return;
     config_manager->remove_host(host_id);
@@ -433,6 +451,7 @@ void NightfallComputerManager::_reset_pairing() {
     is_requesting = false;
     pair_start_time = 0;
     server_unique_id = "";
+    pair_hostname = "";
     server_cert_pem = "";
     server_secret.clear();
     server_challenge.clear();
@@ -585,6 +604,7 @@ void NightfallComputerManager::establish_stream(int host_id, int app_id, Diction
     }
 
     Dictionary ctx;
+    ctx["host_id"] = host_id;
     ctx["ip"] = ip;
     ctx["port"] = port;
     ctx["app_id"] = app_id;
@@ -617,6 +637,18 @@ void NightfallComputerManager::_on_launch_serverinfo_completed(int code, PackedB
     }
 
     String xml = body.get_string_from_utf8();
+    // A PC paired before its name was kept (or renamed in Windows since) gets
+    // it here. The reply must be from the server the record was paired with:
+    // the list can change while the request is out.
+    Array hosts = config_manager->get_hosts();
+    for (int i = 0; i < hosts.size(); i++) {
+        Dictionary h = hosts[i];
+        if ((int64_t)h["id"] == (int64_t)ctx.get("host_id", -1) &&
+                String(h.get("server_unique_id", "")) == _extract_xml_value(xml, "uniqueid")) {
+            _remember_host_name(h, _extract_xml_value(xml, "hostname"));
+            break;
+        }
+    }
     String current_game_str = _extract_xml_value(xml, "currentgame");
     int current_game = current_game_str.to_int();
 

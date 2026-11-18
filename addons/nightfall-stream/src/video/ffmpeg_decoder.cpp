@@ -159,6 +159,15 @@ Vector<String> FfmpegDecoder::get_candidate_decoders(int codec_family) {
         candidates.push_back(base_codec_name + "_mediacodec");
     }
 #else
+#if defined(__linux__) && defined(__aarch64__)
+    // Steam Frame (SteamOS arm64): Qualcomm Iris hardware decoder through the
+    // kernel's stateful V4L2 mem2mem interface. Falls back to software below.
+    if (codec_family == CODEC_FAMILY_H264) {
+        candidates.push_back("h264_v4l2m2m");
+    } else if (codec_family == CODEC_FAMILY_H265) {
+        candidates.push_back("hevc_v4l2m2m");
+    }
+#endif
     if (codec_family == CODEC_FAMILY_H264) {
         candidates.push_back("h264_mediacodec");
         candidates.push_back("h264");
@@ -207,8 +216,11 @@ int FfmpegDecoder::_try_open_decoder(const String &codec_name, int width, int he
     ctx->coded_height = height;
 
     bool is_mediacodec = codec_name.find("_mediacodec") != -1;
+    // V4L2 mem2mem decoders pick their own output format (NV12 on the Frame)
+    // and don't take software-decoder tuning flags.
+    bool is_v4l2m2m = codec_name.find("_v4l2m2m") != -1;
 
-    if (!is_mediacodec) {
+    if (!is_mediacodec && !is_v4l2m2m) {
         ctx->flags |= AV_CODEC_FLAG_LOW_DELAY;
         ctx->delay = 0;
         ctx->flags |= AV_CODEC_FLAG_OUTPUT_CORRUPT;
@@ -219,7 +231,7 @@ int FfmpegDecoder::_try_open_decoder(const String &codec_name, int width, int he
 
     bool enforce_sw_pix_fmt = hw_type == AV_HWDEVICE_TYPE_NONE &&
             codec_name.find("av1") == -1 && codec_name.find("dav1d") == -1 &&
-            !is_mediacodec;
+            !is_mediacodec && !is_v4l2m2m;
     if (enforce_sw_pix_fmt) {
         ctx->pix_fmt = AV_PIX_FMT_YUV420P;
     }
@@ -371,6 +383,8 @@ int FfmpegDecoder::setup(int video_format, int width, int height, bool disable_h
     for (int i = 0; i < candidates.size(); i++) {
         if (disable_hw && candidates[i].find("_mediacodec") != -1) continue;
         for (int j = 0; j < hw_devices.size(); j++) {
+            // V4L2 mem2mem decoders are hardware by themselves; no hwdevice.
+            if (candidates[i].find("_v4l2m2m") != -1 && hw_devices[j] != AV_HWDEVICE_TYPE_NONE) continue;
             if (_try_open_decoder(candidates[i], width, height, hw_devices[j], disable_hw) == 0) {
                 opened_name = candidates[i];
                 if (hw_devices[j] != AV_HWDEVICE_TYPE_NONE)
@@ -391,7 +405,8 @@ int FfmpegDecoder::setup(int video_format, int width, int height, bool disable_h
 
     video_width = width;
     video_height = height;
-    is_hw_decode_active = (opened_name.find("_mediacodec") != -1) || (hw_device_ctx != nullptr);
+    is_hw_decode_active = (opened_name.find("_mediacodec") != -1) || (opened_name.find("_v4l2m2m") != -1) || (hw_device_ctx != nullptr);
+    NF_LOG("FfmpegDecoder", "Opened decoder %s (%s), hw=%d", opened_name.utf8().get_data(), opened_hw.utf8().get_data(), (int)is_hw_decode_active);
 
     return 0;
 }

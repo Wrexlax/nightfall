@@ -126,6 +126,12 @@ func _save_offset():
 	_saved_rot_x = rotation.x
 	_has_saved_offset = true
 
+# Back to the remembered place beside the screen.
+func anchor_to_saved_offset() -> void:
+	global_position = main.primary_screen.global_position + main.primary_screen.global_transform.basis * _saved_offset
+	rotation.y = main.primary_screen.global_rotation.y + _saved_rot_y
+	rotation.x = _saved_rot_x
+
 func _place_default():
 	pass
 
@@ -133,9 +139,7 @@ func toggle():
 	var new_vis = not visible
 	if new_vis:
 		if _has_saved_offset:
-			global_position = main.primary_screen.global_position + main.primary_screen.global_transform.basis * _saved_offset
-			rotation.y = main.primary_screen.global_rotation.y + _saved_rot_y
-			rotation.x = _saved_rot_x
+			anchor_to_saved_offset()
 		else:
 			_place_default()
 			_has_saved_offset = true

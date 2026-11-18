@@ -168,6 +168,19 @@ func _init(p_main):
 	# (checked once the layer is created) is the real signal.
 	equirect_available = ClassDB.class_exists("OpenXRCompositionLayerEquirect")
 
+# Steam Frame: SteamVR has no cylinder layers but does support quads, so the
+# per-screen composition layers (mono + left/right eye) are flat quads there.
+func _new_screen_layer() -> Node3D:
+	if main.device_is_steam_frame:
+		return OpenXRCompositionLayerQuad.new()
+	return OpenXRCompositionLayerCylinder.new()
+
+## Steam Frame: the size a screen's layer pictures are created at (content
+## plus the 8 px margin on each side). With Flat Screen Detail on Stream Size
+## they start at the welcome screen's size and follow the stream from there.
+func _sf_comp_size() -> Vector2i:
+	return (Vector2i(1920, 1080) if VRScreen.sf_match_stream else VRScreen.SF_COMP_BASE_SIZE) + Vector2i(16, 16)
+
 func get_screen_mesh_original_mat() -> Material:
 	return main.primary_screen._original_mat
 
@@ -245,7 +258,7 @@ func setup_screen(s: VRScreen, with_stereo: bool = true):
 	if not available:
 		return
 
-	s.comp_cylinder = OpenXRCompositionLayerCylinder.new()
+	s.comp_cylinder = _new_screen_layer()
 	s.comp_cylinder.name = "CompCylinderLayer_%s" % s.monitor_id
 	s.comp_cylinder.set_sort_order(1)
 	s.comp_cylinder.set_enable_hole_punch(false)
@@ -261,7 +274,7 @@ func setup_screen(s: VRScreen, with_stereo: bool = true):
 	s.comp_viewport.name = "CompViewport_%s" % s.monitor_id
 	s.comp_viewport.disable_3d = true
 	s.comp_viewport.transparent_bg = true
-	s.comp_viewport.size = Vector2i(1920, 1080)
+	s.comp_viewport.size = _sf_comp_size() if main.device_is_steam_frame else Vector2i(1920, 1080)
 	s.comp_base_size = Vector2i(1920, 1080)
 	s.comp_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	main.add_child(s.comp_viewport)
@@ -300,7 +313,7 @@ func setup_screen(s: VRScreen, with_stereo: bool = true):
 func ensure_stereo_layers(s: VRScreen) -> void:
 	if not available or s.comp_cylinder_left != null: return
 
-	s.comp_cylinder_left = OpenXRCompositionLayerCylinder.new()
+	s.comp_cylinder_left = _new_screen_layer()
 	s.comp_cylinder_left.name = "CompCylinderLeft_%s" % s.monitor_id
 	s.comp_cylinder_left.set_sort_order(1)
 	s.comp_cylinder_left.set_enable_hole_punch(false)
@@ -309,7 +322,7 @@ func ensure_stereo_layers(s: VRScreen) -> void:
 	s.comp_cylinder_left.visible = false
 	main.xr_origin.add_child(s.comp_cylinder_left)
 
-	s.comp_cylinder_right = OpenXRCompositionLayerCylinder.new()
+	s.comp_cylinder_right = _new_screen_layer()
 	s.comp_cylinder_right.name = "CompCylinderRight_%s" % s.monitor_id
 	s.comp_cylinder_right.set_sort_order(1)
 	s.comp_cylinder_right.set_enable_hole_punch(false)
@@ -322,7 +335,7 @@ func ensure_stereo_layers(s: VRScreen) -> void:
 	s.comp_viewport_left.name = "CompViewportLeft_%s" % s.monitor_id
 	s.comp_viewport_left.disable_3d = true
 	s.comp_viewport_left.transparent_bg = true
-	s.comp_viewport_left.size = Vector2i(1920, 1080)
+	s.comp_viewport_left.size = _sf_comp_size() if main.device_is_steam_frame else Vector2i(1920, 1080)
 	s.comp_viewport_left.render_target_update_mode = SubViewport.UPDATE_DISABLED
 	main.add_child(s.comp_viewport_left)
 
@@ -348,7 +361,7 @@ func ensure_stereo_layers(s: VRScreen) -> void:
 	s.comp_viewport_right.name = "CompViewportRight_%s" % s.monitor_id
 	s.comp_viewport_right.disable_3d = true
 	s.comp_viewport_right.transparent_bg = true
-	s.comp_viewport_right.size = Vector2i(1920, 1080)
+	s.comp_viewport_right.size = _sf_comp_size() if main.device_is_steam_frame else Vector2i(1920, 1080)
 	s.comp_viewport_right.render_target_update_mode = SubViewport.UPDATE_DISABLED
 	main.add_child(s.comp_viewport_right)
 
@@ -548,6 +561,132 @@ func setup_stats_overlay():
 	_layout_stats_rects()
 	main._log("[COMP] In-screen performance statistics overlay created")
 
+# Brief notice drawn into the screen (same technique as the stats panel):
+# centred near the top, shown for a few seconds, e.g. when a Game Controller
+# mode is turned on.
+var notice_viewport: SubViewport = null
+var notice_label: Label = null
+var notice_rects: Array = []
+var _notice_seq := 0
+var notice_layer: Node3D = null
+const NOTICE_SIZE := Vector2(0.75, 0.15)  # metres; 5:1 like the viewport
+
+func _setup_notice() -> void:
+	if notice_viewport or not main.primary_screen:
+		return
+	notice_viewport = SubViewport.new()
+	notice_viewport.name = "NoticeViewport"
+	notice_viewport.disable_3d = true
+	notice_viewport.transparent_bg = true
+	notice_viewport.size = Vector2i(1200, 240)
+	notice_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
+	main.add_child(notice_viewport)
+	var panel := Panel.new()
+	panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.05, 0.05, 0.08, 0.85)
+	style.set_corner_radius_all(28)
+	style.border_color = Color(1.0, 0.72, 0.25, 0.9)
+	style.set_border_width_all(3)
+	panel.add_theme_stylebox_override("panel", style)
+	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	notice_viewport.add_child(panel)
+	notice_label = Label.new()
+	notice_label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	notice_label.offset_left = 30
+	notice_label.offset_right = -30
+	notice_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	notice_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	notice_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	notice_label.add_theme_font_size_override("font_size", 36)
+	notice_label.add_theme_color_override("font_color", Color.WHITE)
+	notice_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	panel.add_child(notice_label)
+	if main.device_is_steam_frame:
+		# Steam Frame: a free-floating popup on its own top-most layer, in
+		# front of you rather than drawn into the screen, so it shows on a
+		# curved screen (and over everything else) too.
+		notice_layer = OpenXRCompositionLayerQuad.new()
+		notice_layer.name = "NoticeLayer"
+		notice_layer.set_sort_order(1100)
+		notice_layer.set_enable_hole_punch(false)
+		notice_layer.set_alpha_blend(true)
+		notice_layer.set_quad_size(NOTICE_SIZE)
+		notice_layer.visible = false
+		notice_layer.set_layer_viewport(notice_viewport)
+		main.xr_origin.add_child(notice_layer)
+		return
+	var screen = main.primary_screen
+	for target in [
+		{"bezel": screen.comp_bezel_rect, "viewport": screen.comp_viewport},
+		{"bezel": screen.comp_bezel_rect_left, "viewport": screen.comp_viewport_left},
+		{"bezel": screen.comp_bezel_rect_right, "viewport": screen.comp_viewport_right}]:
+		if not target.bezel or not target.viewport:
+			continue
+		var rect := TextureRect.new()
+		rect.name = "NoticeOverlay"
+		rect.texture = notice_viewport.get_texture()
+		rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		rect.stretch_mode = TextureRect.STRETCH_SCALE
+		rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		rect.z_index = 101
+		rect.visible = false
+		target.bezel.add_child(rect)
+		notice_rects.append({"rect": rect, "viewport": target.viewport})
+
+func show_notice(text: String, seconds: float = 5.0) -> void:
+	_setup_notice()
+	if not notice_viewport:
+		return
+	notice_label.text = text
+	if notice_layer:
+		_notice_seq += 1
+		var nseq := _notice_seq
+		if text.is_empty() or seconds <= 0.0:
+			notice_layer.visible = false
+			notice_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
+			return
+		_place_notice_layer()
+		notice_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+		notice_layer.visible = true
+		await main.get_tree().create_timer(seconds).timeout
+		if nseq == _notice_seq:
+			notice_layer.visible = false
+			notice_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
+		return
+	notice_viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
+	for target in notice_rects:
+		var vp: SubViewport = target.viewport
+		var w := float(vp.size.x) * 0.5
+		var h := w * 0.2
+		target.rect.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
+		target.rect.position = Vector2((float(vp.size.x) - w) * 0.5, float(vp.size.y) * 0.06)
+		target.rect.size = Vector2(w, h)
+		target.rect.visible = true
+	_notice_seq += 1
+	var seq := _notice_seq
+	await main.get_tree().create_timer(seconds).timeout
+	if seq == _notice_seq:
+		for target in notice_rects:
+			target.rect.visible = false
+
+# In front of you, a little below eye level, facing you (placed when shown;
+# it doesn't follow your head).
+func _place_notice_layer() -> void:
+	# Where you're looking, including up/down, so it shows when you're lying
+	# down too. In Head Lock Tilt, or looking far up or down, it also matches
+	# your head's tilt.
+	var cam_t: Transform3D = main.xr_camera.global_transform
+	var cam: Vector3 = cam_t.origin
+	var fwd: Vector3 = (-cam_t.basis.z).normalized()
+	var b: Basis
+	if main.settings.head_lock == 2 or absf(fwd.y) > 0.75:
+		b = cam_t.basis.orthonormalized()
+	else:
+		b = Basis.looking_at(fwd, Vector3.UP)  # +Z (the visible side) toward you
+	var pos := cam + fwd * 1.1 - b.y * 0.12
+	notice_layer.global_transform = Transform3D(b, pos)
+
 func set_stats_visible(enabled: bool):
 	if not stats_viewport:
 		return
@@ -582,11 +721,27 @@ func _layout_stats_rects():
 		rect.position = Vector2(margin, margin)
 		rect.size = Vector2(overlay_width, overlay_height)
 
+var _ambient_runtime_unsupported := false
+
 func _setup_ambient_layer() -> bool:
 	if _ambient_layer and _ambient_material:
 		return true
+	# Once the runtime has said no, don't retry (and re-log) every frame.
+	if _ambient_runtime_unsupported:
+		return false
 	if not available or not main.primary_screen:
 		return false
+	if main.device_is_steam_frame:
+		# SteamVR has no cylinder layers: draw the glow as a soft mesh in the 3D
+		# scene just behind the screen instead (see _update_frame_ambient_mesh()).
+		var glow := MeshInstance3D.new()
+		glow.name = "FrameAmbientGlow"
+		glow.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		glow.visible = false
+		main.xr_origin.add_child(glow)
+		_ambient_layer = glow
+		_ambient_native_supported = true
+		return _setup_ambient_viewports()
 	# All ambient cylinders use the same OpenXR layer type as the primary
 	# screen, so its already-created layer is a zero-allocation support probe.
 	# Do not create an ambient node or swapchain while the feature is Off.
@@ -607,10 +762,13 @@ func _setup_ambient_layer() -> bool:
 	if not _ambient_native_supported:
 		main._log("[AMBIENT] Ambient cylinder not natively supported - ambient lighting disabled")
 		_ambient_support_logged = true
+		_ambient_runtime_unsupported = true
 		_ambient_layer.queue_free()
 		_ambient_layer = null
 		return false
+	return _setup_ambient_viewports()
 
+func _setup_ambient_viewports() -> bool:
 	# Reduce the already-rendered screen to a deliberately coarse colour map
 	# before producing the halo. Besides making the glow read as light rather
 	# than a duplicate picture, this keeps every later blur/filter lookup inside
@@ -653,14 +811,24 @@ func _setup_ambient_layer() -> bool:
 	_ambient_material.shader = load("res://src/shaders/ambient_halo.gdshader")
 	_ambient_material.set_shader_parameter("source_texture", _ambient_sample_viewport.get_texture())
 	_ambient_rect.material = _ambient_material
+	_ambient_material.set_shader_parameter("layer_scale", _ambient_scale())
 	_ambient_viewport.add_child(_ambient_rect)
 
-	_ambient_layer.set_layer_viewport(_ambient_viewport)
+	if _ambient_layer is MeshInstance3D:
+		var glow_mat := ShaderMaterial.new()
+		glow_mat.shader = load("res://src/shaders/frame_ambient_glow.gdshader")
+		glow_mat.set_shader_parameter("halo", _ambient_viewport.get_texture())
+		glow_mat.render_priority = -1
+		(_ambient_layer as MeshInstance3D).material_override = glow_mat
+	else:
+		_ambient_layer.set_layer_viewport(_ambient_viewport)
 	_update_ambient_geometry()
 	main._log("[AMBIENT] 32x32 colour sample and low-resolution composition layer created on demand")
 	return true
 
 func ambient_supported() -> bool:
+	if main.device_is_steam_frame:
+		return available and main.primary_screen != null
 	if _ambient_layer:
 		return _ambient_native_supported
 	return available and main.primary_screen != null and main.primary_screen.comp_cylinder != null and main.primary_screen.comp_cylinder.is_natively_supported()
@@ -719,7 +887,9 @@ func _prepare_ambient_sample_update() -> bool:
 		# Preserve the previous 32x32 target and alpha-blend the new frame over
 		# it. Live converges in roughly ten frames; Slow uses a stronger blend
 		# because it only receives ten samples per second.
-		var blend = 0.35 if main.settings.ambient_mode == 2 else 0.12
+		# Slow: a gentle fade of about two seconds (10 samples a second, 6%
+		# each). Live: follows within a fraction of a second.
+		var blend = 0.06 if main.settings.ambient_mode == 2 else 0.12
 		_ambient_sample_rect.modulate = Color(1.0, 1.0, 1.0, blend)
 	return true
 
@@ -760,7 +930,18 @@ func _ambient_static_color() -> Color:
 	]
 	return colors[clampi(main.settings.ambient_color, 0, colors.size() - 1)]
 
+# Glow Size slider: how far the glow reaches past the screen (0-100 maps to
+# 1.10-1.70 x the screen; the default 35 is about the original 1.30).
+func _ambient_scale() -> float:
+	if not main.device_is_steam_frame:
+		return AMBIENT_LAYER_SCALE
+	return 1.10 + 0.006 * float(main.settings.ambient_size)
+
 func _ambient_intensity() -> float:
+	if main.device_is_steam_frame:
+		# Glow Strength slider: 50 = the original strength, 100 = double.
+		var base := 0.35 if main.settings.ambient_mode >= 2 else 0.20
+		return clampf(base * float(main.settings.ambient_strength) / 50.0, 0.0, 1.0)
 	# Static remains Medium; screen-reactive Slow/Live need the stronger High
 	# preset so their changing colours remain clearly visible around the panel.
 	return 0.35 if main.settings.ambient_mode >= 2 else 0.20
@@ -779,6 +960,9 @@ func _refresh_ambient_source(force: bool = false):
 			# A single both-eye halo is intentional. The left-eye composited output
 			# is a stable representative source and avoids a second ambient layer.
 			source = main.primary_screen.comp_viewport_left
+		var curve_src := get_curve_source(main.primary_screen, _stereo_layers_active)
+		if curve_src:
+			source = curve_src
 		source_texture = source.get_texture()
 	if force or source != _ambient_source_viewport or source_texture != _ambient_source_texture:
 		_ambient_source_viewport = source
@@ -802,6 +986,7 @@ func apply_ambient_settings():
 	_ambient_material.set_shader_parameter("reactive", main.settings.ambient_mode >= 2)
 	_ambient_material.set_shader_parameter("static_color", _ambient_static_color())
 	_ambient_material.set_shader_parameter("intensity", _ambient_intensity())
+	_ambient_material.set_shader_parameter("layer_scale", _ambient_scale())
 	_ambient_slow_elapsed = 0.0
 	_ambient_dirty = true
 	# The source viewport can resize/reallocate its render target when a stream
@@ -879,15 +1064,18 @@ func process_ambient(delta: float):
 				_ambient_live_elapsed = fmod(_ambient_live_elapsed, AMBIENT_LIVE_INTERVAL_SEC)
 				if not _prepare_ambient_sample_update():
 					return
-				if _ambient_sample_viewport.render_target_update_mode != SubViewport.UPDATE_ONCE:
-					_ambient_sample_viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
+				# Set it every time, as Slow does: after an UPDATE_ONCE draw the
+				# node still reports UPDATE_ONCE while the renderer has gone
+				# back to disabled, so the old "only if different" check never
+				# asked for another draw and Live froze after its first sample.
+				_ambient_sample_viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
 				_ambient_dirty = false
 
 func _update_ambient_geometry():
 	if not _ambient_layer or not _ambient_viewport or not main.primary_screen:
 		return
 	var s = main.primary_screen
-	var expanded_size: Vector2 = s.mesh_size * AMBIENT_LAYER_SCALE
+	var expanded_size: Vector2 = s.mesh_size * _ambient_scale()
 	var aspect = expanded_size.x / maxf(expanded_size.y, 0.001)
 	var viewport_size: Vector2i
 	if aspect >= 1.0:
@@ -897,6 +1085,9 @@ func _update_ambient_geometry():
 	if _ambient_viewport.size != viewport_size:
 		_ambient_viewport.size = viewport_size
 		_ambient_dirty = true
+	if _ambient_layer is MeshInstance3D:
+		_update_frame_ambient_mesh(s, expanded_size)
+		return
 
 	var radius = maxf(s._comp_cyl_radius, 0.001)
 	var view_dist = maxf((s.global_position - main.xr_camera.global_position).length(), 0.5)
@@ -908,6 +1099,55 @@ func _update_ambient_geometry():
 	_ambient_layer.global_position = s._comp_cyl_center
 	_ambient_layer.global_rotation = s.global_rotation
 
+# Steam Frame glow mesh: a child of the primary screen (so it follows every
+# move), a few centimetres behind it, curved along with the screen.
+const FRAME_GLOW_GAP := 0.03
+
+func _update_frame_ambient_mesh(s: VRScreen, size: Vector2):
+	var glow := _ambient_layer as MeshInstance3D
+	if glow.get_parent() != s:
+		if glow.get_parent():
+			glow.get_parent().remove_child(glow)
+		s.add_child(glow)
+	glow.transform = Transform3D(Basis(), Vector3(0.0, 0.0, -FRAME_GLOW_GAP))
+	var radius := 0.0
+	if s.curvature != 0:
+		radius = (s._mesh_radius if s._mesh_radius > 0.01 else s.get_cylinder_radius()) + FRAME_GLOW_GAP
+	var key := Vector3(size.x, size.y, radius)
+	if glow.has_meta("geom") and glow.get_meta("geom") == key:
+		return
+	glow.set_meta("geom", key)
+	if radius <= 0.0:
+		var quad := QuadMesh.new()
+		quad.size = size
+		glow.mesh = quad
+		return
+	var steps := 32
+	var angle := size.x / radius
+	var verts := PackedVector3Array()
+	var uvs := PackedVector2Array()
+	var idx := PackedInt32Array()
+	for j in range(steps + 1):
+		var t := float(j) / steps
+		var a := -angle * 0.5 + angle * t
+		var x := sin(a) * radius
+		var z := radius - cos(a) * radius
+		verts.append(Vector3(x, size.y * 0.5, z))
+		uvs.append(Vector2(t, 0.0))
+		verts.append(Vector3(x, -size.y * 0.5, z))
+		uvs.append(Vector2(t, 1.0))
+	for j in range(steps):
+		var i0 := j * 2
+		idx.append_array(PackedInt32Array([i0, i0 + 2, i0 + 1, i0 + 1, i0 + 2, i0 + 3]))
+	var arr := []
+	arr.resize(Mesh.ARRAY_MAX)
+	arr[Mesh.ARRAY_VERTEX] = verts
+	arr[Mesh.ARRAY_TEX_UV] = uvs
+	arr[Mesh.ARRAY_INDEX] = idx
+	var m := ArrayMesh.new()
+	m.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
+	glow.mesh = m
+
 func setup_background_equirect():
 	if not equirect_available:
 		main._log("[COMP] OpenXRCompositionLayerEquirect not available - environment backgrounds won't show in projectionless mode")
@@ -915,8 +1155,8 @@ func setup_background_equirect():
 
 	if not main.composition_environment.setup(main, main.xr_origin, main.BG_EQUIRECT_ANGLE_DEG, main.BG_CAPTURE_FOV_DEG):
 		main._log("[COMP] OpenXRCompositionLayerEquirect not natively supported on this runtime - environment backgrounds won't show in projectionless mode")
-		return
-	main._log("[COMP] Environment-background equirect composition layer created")
+	else:
+		main._log("[COMP] Environment-background equirect composition layer created")
 
 	main.composition_panels.setup_ui(main.xr_origin, main.ui_viewport,
 		main._ui_mesh_size + Vector2(0, main.UI_TOOLTIP_STRIP_METERS))
@@ -966,7 +1206,13 @@ func setup_background_equirect():
 	var cylinder = main.primary_screen.comp_cylinder
 	if cylinder and cylinder.is_natively_supported():
 		main._log("[COMP] Composition layer cylinder natively supported")
+	elif main.device_is_steam_frame:
+		# Steam Frame: screen layers are quads (created after this runs, by
+		# setup_screen()), so keep the composition system available.
+		main._log("[COMP] Steam Frame: screen composition layers will be flat quads")
 	else:
+		# Screen is a cylinder layer; if the runtime can't show one, use the 3D mesh.
+		available = false
 		main._log("[COMP] Composition layer cylinder NOT natively supported (using fallback mesh)")
 
 func connect_welcome_texture():
@@ -1025,7 +1271,9 @@ func _update_bezel_for(s: VRScreen):
 		t.yuv.offset_bottom = -inset
 		if t.vp.size != bezel_size:
 			t.vp.size = bezel_size
-		if t.cyl and t.cyl.visible:
+		if t.cyl and t.cyl is OpenXRCompositionLayerQuad:
+			t.cyl.set_quad_size(Vector2(bezel_x, bezel_y))
+		elif t.cyl and t.cyl.visible:
 			t.cyl.set_aspect_ratio(bezel_x / bezel_y)
 
 func update_bezel():
@@ -1045,18 +1293,42 @@ func _update_cylinder_params_for(s: VRScreen):
 		radius = view_dist * 3.0
 	elif s.curvature == 2:
 		radius = view_dist * 2.0
+	if main.device_is_steam_frame and s.curvature != 0:
+		radius = VRScreen.frame_curve_radius(view_dist, main.settings.frame_curve_amount)
 	var screen_forward = -s.global_transform.basis.z
 	var central_angle = s.mesh_size.x / radius
 	var aspect = s.mesh_size.x / s.mesh_size.y
 	# The pointer hits the screen's own curved mesh. A screen moved since that
 	# mesh was built (e.g. a new primary taking the old one's place) would show
 	# its picture on this cylinder while the laser hits the old curve.
-	if s.curvature > 0 and absf(s.built_radius - radius) > radius * 0.01:
+	# (Steam Frame does its own, coarser check below, which also re-applies
+	# its in-scene curved screen.)
+	if not main.device_is_steam_frame and s.curvature > 0 and absf(s.built_radius - radius) > radius * 0.01:
 		s.apply_curvature()
 	s._comp_cyl_radius = radius
 	s._comp_cyl_central_angle = central_angle
 	s._comp_cyl_center = s.global_position - screen_forward * radius
 	var sort_order = clampi(int((10.0 - view_dist) * 10), 1, 100)
+	if s.comp_cylinder is OpenXRCompositionLayerQuad:
+		var base := Vector2(maxf(float(s.comp_base_size.x), 1.0), maxf(float(s.comp_base_size.y), 1.0))
+		var qsize := Vector2(s.mesh_size.x * (1.0 + 16.0 / base.x), s.mesh_size.y * (1.0 + 16.0 / base.y))
+		s._comp_cyl_center = s.global_position
+		for q in [s.comp_cylinder, s.comp_cylinder_left, s.comp_cylinder_right]:
+			if q:
+				q.set_sort_order(sort_order)
+				q.set_quad_size(qsize)
+				q.global_position = s.global_position
+				q.global_rotation = s.global_rotation
+		# Steam Frame curved screen: keep the 3D mesh's curve matched to the
+		# viewing distance after the screen is moved closer or further away.
+		if main.device_is_steam_frame and s.curvature != 0 \
+				and absf(s._mesh_radius - radius) > radius * 0.05:
+			s.apply_curvature()
+			if _frame_curve_active:
+				_apply_frame_curve()
+		if s == main.primary_screen:
+			_update_ambient_geometry()
+		return
 	for cyl in [s.comp_cylinder, s.comp_cylinder_left, s.comp_cylinder_right]:
 		if cyl:
 			cyl.set_sort_order(sort_order)
@@ -1133,6 +1405,13 @@ func bind_yuv_textures():
 	var ctt = mat.get_shader_parameter("color_transfer_type")
 	if ctt == null:
 		ctt = 0
+	# Steam Frame fix: the GLES SurfaceTexture path delivers already-converted
+	# RGB in tex_y only (no U/V planes). The native renderer normally draws it
+	# on Quest; on the legacy path the stream's colorspace later overwrites
+	# color_matrix_type, so the shader decoded RGB as YUV with white U/V
+	# samplers (pink tint). Force RGB passthrough when there are no chroma planes.
+	if OS.get_name() == "Android" and RenderingServer.get_current_rendering_method() == "gl_compatibility" and tex_y != null and tex_u == null:
+		cmt = 3
 	# tex_y can be a non-null Texture object whose underlying RID no longer
 	# points to valid GPU memory - e.g. right after a stream restart, before
 	# the new decoder session has produced its first frame, the shader
@@ -1294,6 +1573,8 @@ func switch_to_comp_layer():
 			scr.bezel_mesh.visible = false
 	update_cylinder_params()
 	update_bezel()
+	_stereo_layers_active = false
+	_apply_frame_curve()
 	_refresh_ambient_source()
 	_ambient_dirty = true
 
@@ -1351,14 +1632,228 @@ func switch_to_stereo_comp_layer():
 	update_bezel()
 	if main.is_streaming:
 		bind_yuv_textures()
+	_stereo_layers_active = true
+	_apply_frame_curve()
 	_refresh_ambient_source()
 	_ambient_dirty = true
 	main._log("[COMP] Switched to stereo composition layer (mode=%d)" % stereo)
 
+# --- Steam Frame curved screen -------------------------------------------
+# SteamVR has no cylinder composition layers, so on the Frame a flat screen is
+# a quad layer and a curved one is drawn in the 3D scene, as Moonlight XR does:
+# the screen's own curved mesh shows the same composed viewport(s) the quad
+# layer would. Being in the 3D scene, controllers can pass in front of it.
+var _stereo_layers_active := false
+var _frame_curve_active := false
+# Going from the quad layers to the screen in the scene, the layers stay up
+# for a few frames more. Hidden at once, the screen vanished for a moment and
+# bare passthrough showed (5s test): what is drawn in the scene reaches the
+# display a little after a layer change does. The layers are in front and show
+# the same picture, so the overlap can't be seen. Three frames left a shorter
+# flicker (5t test); nine is as long as the fade's own handover
+# (PassthroughFade.HANDOVER_SECONDS at 72 Hz).
+const CURVE_LAYER_OVERLAP_FRAMES := 9
+var _curve_overlap := 0
+var _frame_curve_shader: Shader = null
+
+func _frame_curve_mat(s: VRScreen) -> ShaderMaterial:
+	if s.has_meta("frame_curve_mat"):
+		return s.get_meta("frame_curve_mat")
+	if _frame_curve_shader == null:
+		_frame_curve_shader = load("res://src/shaders/frame_curve_screen.gdshader")
+	var m := ShaderMaterial.new()
+	m.shader = _frame_curve_shader
+	s.set_meta("frame_curve_mat", m)
+	return m
+
+func refresh_frame_curve():
+	_apply_frame_curve()
+	if _ambient_layer:
+		_update_ambient_geometry()
+
+func _drawn_in_scene(scr: VRScreen) -> bool:
+	return scr.curvature != 0 or main.settings.frame_flat_3d
+
+func _apply_frame_curve():
+	if not main.device_is_steam_frame or not in_use:
+		_frame_curve_active = false
+		return
+	var any_curved := false
+	var was_active := _frame_curve_active
+	for scr in main.screens:
+		if not _drawn_in_scene(scr) or scr._original_mat == null:
+			continue
+		any_curved = true
+		# Hide the quad layers; they stay attached, so Flat is the same switch
+		# as before. process_frame_curve() pauses their viewports meanwhile.
+		# (Coming from Flat they are hidden a few frames later, see
+		# CURVE_LAYER_OVERLAP_FRAMES.)
+		if was_active and _curve_overlap == 0:
+			_hide_screen_layers(scr)
+		# Like Moonlight XR, the curved screen samples the decoded video
+		# itself: the screen's own 3D material (stereo_screen), which does YUV,
+		# SBS and AI-3D/Meteor depth per eye with VIEW_INDEX. _original_mat
+		# stays set, so going Flat makes the mesh transparent again.
+		scr.material_override = scr._original_mat
+		_sync_curve_material(scr)
+	if any_curved != _frame_curve_active:
+		main._log("[CURVE] Steam Frame screen drawn %s" % ("as a curved 3D mesh (direct video)" if any_curved else "as a flat layer"))
+	_frame_curve_active = any_curved
+	if any_curved and not was_active:
+		_curve_overlap = CURVE_LAYER_OVERLAP_FRAMES
+	process_frame_curve()
+
+# The quad layers' viewports render into SteamVR's swapchain images, which
+# can't be read back (3d-3f showed a white or frozen splash). So instead of
+# copying that picture, mirror the settings of the composition shader (video
+# textures, YUV mode, stereo/AI-3D mode, depth, picture controls) onto the
+# screen's own 3D material every frame. Both shaders share those names.
+var _curve_param_names: Dictionary = {}
+
+func _sync_curve_material(scr: VRScreen):
+	var dst := scr.material_override as ShaderMaterial
+	if dst == null or dst != scr._original_mat or dst.shader == null:
+		return
+	var stereo := 0
+	if scr == main.primary_screen and main.settings_controller and main.is_streaming:
+		stereo = main.settings_controller.get_stereo_mode()
+	var src: ShaderMaterial = scr.comp_shader_mat
+	if stereo > 0 and scr.comp_shader_mat_left:
+		src = scr.comp_shader_mat_left
+	if src == null:
+		return
+	var key := dst.shader.get_instance_id()
+	if not _curve_param_names.has(key):
+		var names: Array = []
+		for u in dst.shader.get_shader_uniform_list(true):
+			var n: String = u.get("name", "")
+			# uv_region is mirrored too: it is the screen's own part of the
+			# stream frame. Left out until 6q, every curved screen showed the
+			# whole frame once there was more than one (the mesh material only
+			# got its region if it happened to be on the mesh when the monitor
+			# was assigned, and in Layer mode it isn't).
+			if n != "" and n != "stereo_mode" and n != "tile_inset":
+				names.append(n)
+		_curve_param_names[key] = names
+	for n in _curve_param_names[key]:
+		var v = src.get_shader_parameter(n)
+		if v == null:
+			continue
+		if dst.get_shader_parameter(n) != v:
+			dst.set_shader_parameter(n, v)
+	if dst.get_shader_parameter("stereo_mode") != stereo:
+		dst.set_shader_parameter("stereo_mode", stereo)
+	if dst.get_shader_parameter("use_prepass") != true:
+		dst.set_shader_parameter("use_prepass", true)
+	var fast: bool = main.settings.frame_fast_filter
+	if dst.get_shader_parameter("footprint_fast") != fast:
+		dst.set_shader_parameter("footprint_fast", fast)
+
+func _copy_shader_params(src: ShaderMaterial, dst: ShaderMaterial, skip: Array):
+	var key := src.shader.get_instance_id()
+	if not _curve_param_names.has(key):
+		var names: Array = []
+		for u in src.shader.get_shader_uniform_list(true):
+			var n: String = u.get("name", "")
+			if n != "":
+				names.append(n)
+		_curve_param_names[key] = names
+	for n in _curve_param_names[key]:
+		if n in skip:
+			continue
+		var v = src.get_shader_parameter(n)
+		if v != null and dst.get_shader_parameter(n) != v:
+			dst.set_shader_parameter(n, v)
+
+# Ambient glow source while curved: the hidden quad layer's viewport can't be
+# read, so draw a small private copy of the plain (mono) picture with the same
+# 2D video shader, kept in step every frame. Only 128x72: the glow reduces it
+# to 32x32 anyway.
+var _curve_ambient_vp: SubViewport = null
+var _curve_ambient_mat: ShaderMaterial = null
+
+func _ensure_curve_ambient_vp() -> SubViewport:
+	if _curve_ambient_vp:
+		return _curve_ambient_vp
+	_curve_ambient_vp = SubViewport.new()
+	_curve_ambient_vp.name = "FrameCurveAmbientSource"
+	_curve_ambient_vp.disable_3d = true
+	_curve_ambient_vp.transparent_bg = false
+	_curve_ambient_vp.gui_disable_input = true
+	_curve_ambient_vp.size = Vector2i(128, 72)
+	_curve_ambient_vp.render_target_update_mode = SubViewport.UPDATE_DISABLED
+	main.add_child(_curve_ambient_vp)
+	var rect := ColorRect.new()
+	rect.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_curve_ambient_mat = ShaderMaterial.new()
+	rect.material = _curve_ambient_mat
+	_curve_ambient_vp.add_child(rect)
+	return _curve_ambient_vp
+
+func _process_curve_ambient():
+	# Steam Frame, flat or curved: the screen layer's own viewport renders into
+	# SteamVR's swapchain and can't be sampled, so Slow/Live always read this.
+	var want: bool = main.device_is_steam_frame and in_use and main.primary_screen != null \
+		and main.settings.ambient_mode >= 2
+	if not want:
+		if _curve_ambient_vp and _curve_ambient_vp.render_target_update_mode != SubViewport.UPDATE_DISABLED:
+			_curve_ambient_vp.render_target_update_mode = SubViewport.UPDATE_DISABLED
+		return
+	var src: ShaderMaterial = main.primary_screen.comp_shader_mat
+	if src == null or src.shader == null:
+		return
+	_ensure_curve_ambient_vp()
+	if _curve_ambient_mat.shader != src.shader:
+		_curve_ambient_mat.shader = src.shader
+	_copy_shader_params(src, _curve_ambient_mat, ["stereo_mode", "eye_index"])
+	if _curve_ambient_mat.get_shader_parameter("stereo_mode") != 0:
+		_curve_ambient_mat.set_shader_parameter("stereo_mode", 0)
+	if _curve_ambient_vp.render_target_update_mode != SubViewport.UPDATE_ALWAYS:
+		_curve_ambient_vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+
+# Every frame while a curved screen is shown: keep its material in step with
+# the composition shader, and pause the hidden layers' viewports (nothing
+# shows them, and they would only draw into SteamVR's swapchain).
+func _hide_screen_layers(scr: VRScreen) -> void:
+	for q in [scr.comp_cylinder, scr.comp_cylinder_left, scr.comp_cylinder_right]:
+		if q and q.visible:
+			q.visible = false
+
+func process_frame_curve():
+	_process_curve_ambient()
+	var overlapping := _curve_overlap > 0
+	if overlapping:
+		_curve_overlap -= 1
+	if not _frame_curve_active:
+		return
+	for scr in main.screens:
+		if not _drawn_in_scene(scr):
+			continue
+		_sync_curve_material(scr)
+		if overlapping:
+			# The layers are still showing: leave their viewports drawing,
+			# and take the layers down on the last frame of the overlap.
+			if _curve_overlap == 0:
+				_hide_screen_layers(scr)
+			continue
+		for vp in [scr.comp_viewport, scr.comp_viewport_left, scr.comp_viewport_right]:
+			if vp and vp.render_target_update_mode != SubViewport.UPDATE_DISABLED:
+				vp.render_target_update_mode = SubViewport.UPDATE_DISABLED
+
+func get_curve_source(scr: VRScreen, _stereo: bool) -> SubViewport:
+	if not main.device_is_steam_frame or scr == null or main.settings.ambient_mode < 2:
+		return null
+	return _ensure_curve_ambient_vp()
+
 func switch_to_mesh_rendering():
+	main._log("[DBG] switch_to_mesh_rendering 1")
 	in_use = false
+	main._log("[DBG] switch_to_mesh_rendering 2")
 	_disable_ambient()
+	main._log("[DBG] switch_to_mesh_rendering 3")
 	main.stream_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS if main.is_streaming else SubViewport.UPDATE_DISABLED
+	main._log("[DBG] switch_to_mesh_rendering 4")
 	for scr in main.screens:
 		if scr.comp_cylinder: scr.comp_cylinder.visible = false
 		if scr.comp_cylinder_left: scr.comp_cylinder_left.visible = false
@@ -1367,12 +1862,19 @@ func switch_to_mesh_rendering():
 			scr.comp_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 		if scr.bezel_mesh:
 			scr.bezel_mesh.visible = main.settings.bezel_enabled
+	main._log("[DBG] switch_to_mesh_rendering 5")
 	main.composition_panels.deactivate()
+	main._log("[DBG] switch_to_mesh_rendering 6")
 	main.composition_pointers.deactivate()
+	main._log("[DBG] switch_to_mesh_rendering 7")
 	restore_screen_material()
+	main._log("[DBG] switch_to_mesh_rendering 8")
 	restore_ui_material()
+	main._log("[DBG] switch_to_mesh_rendering 9")
 	restore_kb_material()
+	main._log("[DBG] switch_to_mesh_rendering 10")
 	update_bezel()
+	main._log("[DBG] switch_to_mesh_rendering 11")
 	if main.is_streaming:
 		main.stream_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 		var mode = main.settings_controller.get_stereo_mode()

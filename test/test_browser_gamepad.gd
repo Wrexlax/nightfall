@@ -8,6 +8,7 @@ class FakeBrowser extends RefCounted:
 	func clear_gamepad(): cleared += 1
 
 class FakeMain extends Node3D:
+	var device_is_steam_frame := false # the Steam Frame port reads this from main
 	var browser_prototype := FakeBrowser.new()
 	var input_handler: InputHandler
 	var stream_backend = null # Any accidental PC send must fail this test.

@@ -1902,6 +1902,7 @@ dependencies = [
  "toml_edit",
  "ureq",
  "wasapi",
+ "windows 0.62.2",
  "windows-sys 0.61.2",
  "x25519-dalek",
  "zbus",

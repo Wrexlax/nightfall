@@ -12,14 +12,30 @@
 #ifndef Output
   #error Output must point to the installer output folder
 #endif
+; A build that isn't upstream's own names itself and where to ask about it
+; (the Steam Frame port's installer: tools/build_frame_installer.ps1).
+; Such a build passes Publisher, and gets upstream's links only if it passes
+; them too.
+#ifndef Publisher
+  #define Publisher "Nightfall"
+  #define PublisherURL "https://github.com/tB0nE/nightfall"
+  #define SupportURL "https://github.com/tB0nE/nightfall/issues"
+#endif
+#ifndef OutputName
+  #define OutputName "Nightfall-Meteor-" + AppVersion + "-Setup-x64"
+#endif
 
 [Setup]
 AppId=Nightfall.Meteor
 AppName=Nightfall Meteor
 AppVersion={#AppVersion}
-AppPublisher=Nightfall
-AppPublisherURL=https://github.com/tB0nE/nightfall
-AppSupportURL=https://github.com/tB0nE/nightfall/issues
+AppPublisher={#Publisher}
+#ifdef PublisherURL
+AppPublisherURL={#PublisherURL}
+#endif
+#ifdef SupportURL
+AppSupportURL={#SupportURL}
+#endif
 DefaultDirName={localappdata}\Programs\Nightfall Meteor
 DefaultGroupName=Nightfall Meteor
 DisableProgramGroupPage=yes
@@ -27,7 +43,7 @@ SetupArchitecture=x64
 PrivilegesRequired=lowest
 LicenseFile={#RepoRoot}\LICENSE
 OutputDir={#Output}
-OutputBaseFilename=Nightfall-Meteor-{#AppVersion}-Setup-x64
+OutputBaseFilename={#OutputName}
 Compression=lzma2
 SolidCompression=yes
 CloseApplications=yes

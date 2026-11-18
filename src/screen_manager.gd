@@ -132,6 +132,30 @@ func cycle_curvature():
 	main.ui_controller.update_option_btn(main._ui_curve_btn, main.curvature_labels[main.curvature])
 	main.state_manager.save_state()
 
+# Steam Frame Curve slider. live=true while dragging (geometry only, no save);
+# the release call saves. Only crossing between flat and curved switches the
+# screen between the SteamVR layer and the 3D scene.
+func set_curve_amount(amount: int, commit: bool):
+	amount = clampi(amount, 0, 100)
+	var was_curved: bool = main.curvature != 0
+	main.settings.frame_curve_amount = amount
+	var now_curved := amount > 0
+	for s in main.screens:
+		s.curvature = 1 if now_curved else 0
+		s.apply_curvature()
+	main.settings_controller.reflow_grid_screens()
+	if main.comp.available:
+		main.comp.update_cylinder_params()
+	var native_active = main.video_presentation != null and main.video_presentation.is_native_active()
+	if main.comp.in_use and not native_active:
+		if was_curved != now_curved:
+			main.comp.switch_to_comp_layer()
+		else:
+			main.comp.refresh_frame_curve()
+	main.ui_controller.set_slider_value(main._ui_curve_btn, amount)
+	if commit:
+		main.state_manager.save_state()
+
 func apply_curvature():
 	for s in main.screens:
 		s.apply_curvature()

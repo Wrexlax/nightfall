@@ -544,6 +544,33 @@ void TextureUploader::update_from_frame(AVFrame *frame) {
     }
 }
 
+bool TextureUploader::update_from_nv12_strided(int width, int height, const uint8_t *y, int y_pitch, const uint8_t *uv, int uv_pitch) {
+    if (!y || !uv || !use_shader_conversion || !rd || !is_nv12) return false;
+    RenderingServer *rs = RenderingServer::get_singleton();
+    {
+        std::lock_guard<godot::Mutex> lock(*(texture_mutex.ptr()));
+        const int required_y = width * height;
+        const int required_uv = width * (height / 2);
+        if (rd_texture_buffers[0].size() != required_y) rd_texture_buffers[0].resize(required_y);
+        if (rd_texture_buffers[1].size() != required_uv) rd_texture_buffers[1].resize(required_uv);
+        uint8_t *dy = rd_texture_buffers[0].ptrw();
+        uint8_t *duv = rd_texture_buffers[1].ptrw();
+        if (y_pitch == width) {
+            memcpy(dy, y, required_y);
+        } else {
+            for (int r = 0; r < height; r++) memcpy(dy + (size_t)r * width, y + (size_t)r * y_pitch, width);
+        }
+        if (uv_pitch == width) {
+            memcpy(duv, uv, required_uv);
+        } else {
+            for (int r = 0; r < height / 2; r++) memcpy(duv + (size_t)r * width, uv + (size_t)r * uv_pitch, width);
+        }
+        pending_gpu_update.store(true);
+    }
+    rs->call_on_render_thread(callable_mp(this, &TextureUploader::perform_gpu_update));
+    return true;
+}
+
 void TextureUploader::update_from_raw_nv12(int width, int height, const uint8_t *data, uint32_t y_size, uint32_t uv_size) {
     if (!data || !use_shader_conversion) return;
 
@@ -2028,6 +2055,7 @@ bool TextureUploader::supports_native_depth_capture() {
 }
 
 void TextureUploader::set_native_depth_capture_crop(PackedFloat32Array crop) {
+#ifdef __ANDROID__
     std::lock_guard<std::mutex> lock(gles_depth_crop_mutex_);
     if (crop.size() == 4 && crop[2] > 0.0f && crop[3] > 0.0f) {
         for (int i = 0; i < 4; ++i) gles_depth_crop_[i] = crop[i];
@@ -2035,6 +2063,11 @@ void TextureUploader::set_native_depth_capture_crop(PackedFloat32Array crop) {
         gles_depth_crop_[0] = gles_depth_crop_[1] = 0.0f;
         gles_depth_crop_[2] = gles_depth_crop_[3] = 1.0f;
     }
+#else
+    // Native depth capture is Android-only (upstream 0.9.0 left this body
+    // unguarded, which doesn't compile elsewhere).
+    (void)crop;
+#endif
 }
 
 void TextureUploader::request_native_depth_capture(int width, int height) {

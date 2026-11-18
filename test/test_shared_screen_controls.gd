@@ -5,6 +5,7 @@ class Sources extends RefCounted:
 	func browser_for_screen(_screen): return null
 
 class Owner extends Node3D:
+	var device_is_steam_frame := false # the Steam Frame port reads this from main
 	var primary_screen: VRScreen
 	var screen_sources := Sources.new()
 	var settings := AppSettings.new()

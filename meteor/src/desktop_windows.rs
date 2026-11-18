@@ -106,12 +106,49 @@ pub fn attach_parent_console_if_needed() {
 /// Windows equivalent of the Linux `desktop::host_pairing_popup()`.
 /// Shows a balloon notification with the PIN; approve/reject live in the tray
 /// right-click menu and balloon click.
+///
+/// Steam Frame port: and a window in front of everything that asks. Windows
+/// keeps notifications back while something is full screen or Do Not Disturb
+/// is on, and a request only lasts a minute: on 2026-11-18 four requests in a
+/// row went unanswered because nothing on the PC's screen said one was
+/// waiting.
 pub async fn host_pairing_popup(pairing: std::sync::Arc<crate::host::pairing::Pairing>, request: String) {
-    if let Some(pending) = pairing.pending() {
-        if pending.id == request {
-            crate::tray_windows::queue_pairing_balloon(&pending.pin);
-        }
+    let Some(pending) = pairing.pending().filter(|pending| pending.id == request) else { return };
+    crate::tray_windows::queue_pairing_balloon(&pending.pin);
+    let pin = pending.pin.clone();
+    // The window waits for a click, so it gets a thread of its own.
+    let answer = tokio::task::spawn_blocking(move || ask_to_pair(&pin)).await.unwrap_or(None);
+    // Answered late, or already answered from the tray: nothing is waiting
+    // under this id any more, and both calls then do nothing.
+    match answer {
+        Some(true) => pairing.approve(&request),
+        Some(false) => pairing.reject(&request),
+        None => {}
     }
+}
+
+/// Asks in a window that stays on top. Some(true) for Yes, Some(false) for
+/// No, None if the window was closed some other way.
+fn ask_to_pair(pin: &str) -> Option<bool> {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{IDNO, IDYES, MB_ICONQUESTION, MB_SETFOREGROUND, MB_TOPMOST, MB_YESNO, MessageBoxW};
+    let text = wide(&pairing_question(pin));
+    let title = wide("Nightfall Meteor: pair a headset?");
+    // SAFETY: both strings are NUL-terminated and outlive the call; no owner window.
+    let answer = unsafe { MessageBoxW(std::ptr::null_mut(), text.as_ptr(), title.as_ptr(), MB_YESNO | MB_ICONQUESTION | MB_TOPMOST | MB_SETFOREGROUND) };
+    if answer == IDYES {
+        Some(true)
+    } else if answer == IDNO {
+        Some(false)
+    } else {
+        None
+    }
+}
+
+/// What the window says.
+fn pairing_question(pin: &str) -> String {
+    format!(
+        "A Nightfall headset is asking to pair with this PC.\n\nPIN shown in the headset:   {pin}\n\nIf that is the PIN you see in your headset, choose Yes.\nIf you did not start this, choose No.\n\nThe request lasts one minute; after that, start pairing in the headset again."
+    )
 }
 
 fn wide(text: &str) -> Vec<u16> {

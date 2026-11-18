@@ -171,7 +171,7 @@ var ai_3d_process_debug_labels: Array = ["Off", "Raw", "Spatial", "Guided", "Occ
 const AI3D_BACKEND_CPU := 1
 const AI3D_BACKEND_GPU := 2
 const AI3D_HZ_CAP_VALUES: Array = [12, 15, 20, 30, 40, 60]
-const AI3D_SEPARATION_VALUES: Array = [50, 75, 100]
+const AI3D_SEPARATION_VALUES: Array = [50, 75, 100, 125, 150, 200]
 const AI3D_CONVERGENCE_VALUES: Array = [30, 40, 50, 60, 70]
 const AI3D_CURSOR_POSITION_LABELS: Array = ["Left", "Default", "Right"]
 # stereo_screen.gdshader's own live-path separation constant (mesh-
@@ -380,12 +380,17 @@ func _ai_3d_supported() -> bool:
 # kept current by cycle_ai_3d_mode() below) instead of always landing on
 # Auto - tier selection itself now lives on the AI 3D tab.
 func toggle_ai_3d_enabled():
+	main._log("[AI3D] toggle requested: speed=%d last_mode=%d sbs_mode=%d screens=%d" % [
+		main.settings.host.ai_3d_speed, main.settings.host.ai_3d_last_mode,
+		main.settings.host.sbs_mode, main.screens.size()])
 	if not _ai_3d_supported():
 		return
 	if main.settings.host.sbs_mode > 0:
+		main._log("[AI3D] ignored: SBS mode is on (turn SBS off first)")
 		return
 	if main.settings.host.ai_3d_speed == 0:
-		main.settings.host.ai_3d_speed = main.settings.host.ai_3d_last_mode
+		# A saved last_mode of 0 would leave 3D stuck off; fall back to Auto.
+		main.settings.host.ai_3d_speed = main.settings.host.ai_3d_last_mode if main.settings.host.ai_3d_last_mode > 0 else 1
 	else:
 		main.settings.host.ai_3d_last_mode = main.settings.host.ai_3d_speed
 		main.settings.host.ai_3d_speed = 0
@@ -463,6 +468,17 @@ func cycle_ai_3d_type():
 func cycle_ai_3d_hz_cap():
 	if not _ai_3d_supported():
 		return
+	if frame_depth_available():
+		# Steam Frame: the rate of the headset's own model, kept for the
+		# headset rather than per PC, and changed without restarting anything.
+		if main.settings.host.sbs_mode > 0 or main.settings.host.ai_3d_speed == 0 or meteor_depth_selected():
+			return
+		var rates: Array = [FRAME_DEPTH_RATE_AUTO] + AI3D_HZ_CAP_VALUES
+		main.settings.frame_depth_rate = rates[(maxi(rates.find(main.settings.frame_depth_rate), 0) + 1) % rates.size()]
+		_frame_depth_auto.reset()
+		_save_setting(main._ui_3d_hz_cap_btn, hz_cap_label())
+		main.stream_backend.set_depth_hz_cap(get_effective_hz_cap())
+		return
 	if main.settings.host.sbs_mode > 0 or main.settings.host.ai_3d_speed == 0 or main.settings.host.ai_3d_speed == 1:
 		return
 	var idx = AI3D_HZ_CAP_VALUES.find(main.settings.host.ai_3d_hz_cap)
@@ -489,6 +505,55 @@ func cycle_ai_3d_separation():
 func get_ai_3d_separation_label() -> String:
 	var value: int = main.settings.host.ai_3d_separation_pct
 	return "%d%%%s" % [value, " (Default)" if value == 75 else ""]
+
+# Steam Frame: Separation and Convergence are sliders with a wider range than
+# the cycle buttons' lists. Those lists were menu choices, not limits of the
+# warp: the shaders take any strength and any convergence from 0 to 1. Higher
+# separation costs a little more GPU (the warp searches further sideways) and
+# stretches the picture more around the edges of near things.
+const AI3D_SEPARATION_SLIDER_STEPS := 15 # 25% .. 400%, 25% apart (HostSettings.separation_valid)
+
+func _ai_3d_effect_adjustable() -> bool:
+	return _ai_3d_supported() and main.settings.host.sbs_mode == 0 and main.settings.host.ai_3d_speed != 0
+
+func set_ai_3d_separation(value: int, commit: bool) -> void:
+	if not _ai_3d_effect_adjustable():
+		refresh_ai_3d_sliders()
+		return
+	main.auto_detect_enabled = false
+	var step: int = clampi(int(round(value * AI3D_SEPARATION_SLIDER_STEPS / 100.0)), 0, AI3D_SEPARATION_SLIDER_STEPS)
+	main.settings.host.ai_3d_separation_pct = 25 + 25 * step
+	refresh_ai_3d_sliders()
+	_apply_ai_3d_effect_live(commit)
+
+func set_ai_3d_convergence(value: int, commit: bool) -> void:
+	if not _ai_3d_effect_adjustable():
+		refresh_ai_3d_sliders()
+		return
+	main.auto_detect_enabled = false
+	main.settings.host.ai_3d_convergence_pct = clampi(int(round(value / 5.0)) * 5, 0, 100)
+	refresh_ai_3d_sliders()
+	_apply_ai_3d_effect_live(commit)
+
+# While dragging, the picture follows at once; letting go saves and runs the
+# same commit the cycle buttons use.
+func _apply_ai_3d_effect_live(commit: bool) -> void:
+	if main.depth_estimator:
+		main.depth_estimator.set_separation_pct(main.settings.host.ai_3d_separation_pct)
+	_push_ai3d_effect_uniforms()
+	if commit:
+		main.state_manager.save_state()
+		_schedule_ai_3d_commit()
+
+## Shows the current values on the two sliders (no-op for plain buttons).
+func refresh_ai_3d_sliders() -> void:
+	var sep_btn: Button = main._ui_3d_separation_btn
+	if sep_btn and sep_btn.has_meta("slider"):
+		var step: int = clampi(int(round((main.settings.host.ai_3d_separation_pct - 25) / 25.0)), 0, AI3D_SEPARATION_SLIDER_STEPS)
+		main.ui_controller.set_slider_value(sep_btn, int(round(step * 100.0 / AI3D_SEPARATION_SLIDER_STEPS)), get_ai_3d_separation_label())
+	var conv_btn: Button = main._ui_3d_convergence_btn
+	if conv_btn and conv_btn.has_meta("slider"):
+		main.ui_controller.set_slider_value(conv_btn, main.settings.host.ai_3d_convergence_pct, get_ai_3d_convergence_label())
 
 # AI 3D tab's "Convergence" control (2026-08-28) - maps directly to the
 # warp shaders' already-declared "convergence" uniform (0.30-0.70), which
@@ -549,7 +614,7 @@ func toggle_ai_3d_contour_cleanup():
 		main.native_xr_renderer.request_redraw()
 
 func toggle_ai_3d_depth_view():
-	if OS.get_name() != "Android" or main.settings.host.sbs_mode > 0 \
+	if (OS.get_name() != "Android" and not main.device_is_steam_frame) or main.settings.host.sbs_mode > 0 \
 			or main.settings.host.ai_3d_speed == 0:
 		return
 	main.settings.host.ai_3d_depth_view = not main.settings.host.ai_3d_depth_view
@@ -628,13 +693,87 @@ func selected_depth_model_index() -> int:
 ## Meteor again). depth_estimator.gd falls back to on-device depth while
 ## Meteor's maps aren't arriving.
 func meteor_depth_selected() -> bool:
+	# A Steam Frame build without on-headset depth: Meteor is the only depth
+	# source and can't be declined.
+	if main.device_is_steam_frame and not frame_depth_available():
+		return meteor_depth_offered()
 	return meteor_depth_offered() and not main.settings.host.ai_3d_meteor_declined
+
+# --- Steam Frame: on-headset depth (frame_depth_engine.h) ---
+# In the order of the native engine's models: ZipDepth at 512x288, and the
+# 256 pixel 8-bit one, which is several times lighter on the processor. The
+# third is Meteor's own model on the headset's graphics chip (a test in 7j;
+# since 7k its work is ranked below Nightfall's drawing, and it holds every
+# display rate). It is only offered where the build has that engine and the
+# model's files.
+const FRAME_DEPTH_LABELS: Array[String] = ["Headset: Detail", "Headset: Light", "Headset: GPU"]
+const FRAME_DEPTH_GPU_MODEL := 2
+
+## Whether this build can make the depth on the headset itself. Asked every
+## frame, and the answer can't change while the app runs, so it is kept.
+var _frame_depth_known := false
+var _frame_depth_there := false
+
+func frame_depth_available() -> bool:
+	if not _frame_depth_known and main.stream_backend != null:
+		_frame_depth_known = true
+		_frame_depth_there = main.device_is_steam_frame and main.stream_backend.has_decoder_depth()
+		if main.device_is_steam_frame:
+			main._log("[DEPTH] on-headset depth: %s" % ("in this build" if _frame_depth_there else "not in this build (Meteor only)"))
+	return _frame_depth_there
+
+## How many of FRAME_DEPTH_LABELS this headset can use: the two processor
+## models, and the graphics-chip one where it is there.
+var _frame_depth_models := 0
+
+func frame_depth_model_count() -> int:
+	if _frame_depth_models == 0 and frame_depth_available():
+		var gpu: bool = main.stream_backend.decoder_depth_model_present(FRAME_DEPTH_GPU_MODEL)
+		_frame_depth_models = FRAME_DEPTH_LABELS.size() if gpu else FRAME_DEPTH_GPU_MODEL
+		main._log("[DEPTH] on-headset depth on the graphics chip: %s" % ("offered (test)" if gpu else "not in this build"))
+	return maxi(_frame_depth_models, 1)
+
+## The headset model in use: the saved one, or the first when that one isn't here.
+func frame_depth_model() -> int:
+	var saved: int = main.settings.frame_depth_model
+	return saved if saved < frame_depth_model_count() else 0
+
+## The Frame's Model choices in turn: Meteor first while it is offered, then
+## the headset's own models. Returns MODEL_METEOR or a headset model's number.
+static func next_frame_depth_choice(meteor_offered: bool, meteor_selected: bool, model: int, models: int = 2) -> int:
+	var choices: Array[int] = []
+	if meteor_offered:
+		choices.append(MODEL_METEOR)
+	for i in models:
+		choices.append(i)
+	var at := 0 if (meteor_offered and meteor_selected) else choices.find(model)
+	return choices[(maxi(at, -1) + 1) % choices.size()]
 
 # Cycles only within the entries matching the current Type
 # (main.settings.host.ai_3d_backend_pref) - see _ai_3d_model_indices_for_type() above.
 # Meteor comes first while it's offered.
 func cycle_ai_3d_model():
 	if not _ai_3d_supported():
+		return
+	if main.device_is_steam_frame:
+		if not frame_depth_available():
+			main.settings.host.ai_3d_meteor_declined = false
+			return
+		if main.settings.host.sbs_mode > 0 or main.settings.host.ai_3d_speed == 0:
+			return
+		var offered := meteor_depth_offered()
+		var choice := next_frame_depth_choice(offered, meteor_depth_selected(), frame_depth_model(), frame_depth_model_count())
+		if choice == MODEL_METEOR:
+			main.settings.host.ai_3d_meteor_declined = false
+		else:
+			main.settings.frame_depth_model = choice
+			# Declining Meteor is only a choice while it is on offer (and is
+			# kept for this PC, as on the other devices).
+			if offered:
+				main.settings.host.ai_3d_meteor_declined = true
+		_save_setting(main._ui_3d_btn, get_depth_model_label())
+		main.ui_controller.update_3d_btn_state()
+		_schedule_ai_3d_commit(0.8)
 		return
 	if main.settings.host.sbs_mode > 0 or main.settings.host.ai_3d_speed == 0 or (OS.get_name() != "Android" and main.settings.host.ai_3d_speed == 1):
 		return
@@ -796,6 +935,9 @@ func enforce_ai3d_platform_lock(prefer_auto: bool = false):
 func get_depth_model_index() -> int:
 	if main.settings.host.ai_3d_speed == 0:
 		return 0
+	if main.device_is_steam_frame:
+		# The Frame's engine numbers its own models (FRAME_DEPTH_LABELS).
+		return frame_depth_model()
 	if OS.get_name() == "Android" and get_depth_backend_index() == AI3D_BACKEND_CPU:
 		return ai_3d_models[_android_cpu_model_index()].java_index
 	if is_android_ai3d_auto():
@@ -826,6 +968,8 @@ func active_android_depth_model_name() -> String:
 func get_depth_model_label() -> String:
 	if meteor_depth_selected():
 		return "Meteor"
+	if main.device_is_steam_frame:
+		return FRAME_DEPTH_LABELS[frame_depth_model()] if frame_depth_available() else "Needs Meteor"
 	if OS.get_name() == "Android" and get_depth_backend_index() == AI3D_BACKEND_CPU:
 		return ai_3d_models[_android_cpu_model_index()].label
 	if OS.get_name() == "Linux" and main.settings.host.ai_3d_speed == 1:
@@ -886,12 +1030,108 @@ func get_depth_backend_index() -> int:
 # Java inference loop, so they can never disagree.
 func get_effective_hz_cap() -> int:
 	var base := _base_hz_cap()
+	if voice_easing_depth():
+		return mini(base, VOICE_DEPTH_RATE)
 	if is_ai3d_adaptive_active() and _ai3d_pacer.current_hz > 0.0:
 		return mini(base, int(_ai3d_pacer.current_hz))
 	return base
 
 func _base_hz_cap() -> int:
+	if frame_depth_available():
+		return _frame_depth_auto.rate() if frame_depth_auto() else main.settings.frame_depth_rate
 	return 20 if main.settings.host.ai_3d_speed == 1 else main.settings.host.ai_3d_hz_cap
+
+## Steam Frame: Hz Cap "Auto" for the headset's own model (FrameDepthAutoRate).
+const FRAME_DEPTH_RATE_AUTO := 0
+var _frame_depth_auto := FrameDepthAutoRate.new()
+
+func frame_depth_auto() -> bool:
+	return frame_depth_available() and main.settings.frame_depth_rate == FRAME_DEPTH_RATE_AUTO
+
+## What the Hz Cap button shows.
+func hz_cap_label() -> String:
+	return "Auto" if frame_depth_auto() else "%dhz" % get_effective_hz_cap()
+
+## Whether the headset's own model is the one making the depth just now.
+func _frame_depth_running() -> bool:
+	return main.is_streaming and main.depth_estimator != null and main.depth_estimator.decoder_depth_on()
+
+## The rate last sent to the model by Auto; -1 while the model isn't running,
+## so the first second it runs again sends the rate afresh.
+var _frame_depth_rate_sent := -1
+
+func _pace_frame_depth(sample: Dictionary) -> void:
+	if not _frame_depth_running():
+		_frame_depth_auto.reset()
+		_frame_depth_rate_sent = -1
+		return
+	if voice_easing_depth():
+		return   # the rate is voice typing's for the moment; nothing to judge by
+	var app_fps := float(sample.get("app_fps", 0.0))
+	var model_ms: float = main.stream_backend.get_depth_last_inference_ms() if main.stream_backend else 0.0
+	var before := _frame_depth_auto.rate()
+	_frame_depth_auto.on_sample(app_fps, float(main.display_refresh_rate), model_ms)
+	var rate := _frame_depth_auto.rate()
+	if rate == _frame_depth_rate_sent or not main.stream_backend:
+		return
+	_frame_depth_rate_sent = rate
+	main.stream_backend.set_depth_hz_cap(rate)
+	main._log("[DEPTH] Auto rate %d a second%s (app %.0f of %.0f fps; model %.0f ms a map, so at most %d)" % [
+		rate, "" if rate == before else ", from %d" % before, app_fps, float(main.display_refresh_rate),
+		model_ms, FrameDepthAutoRate.model_ceiling(model_ms)])
+
+## Steam Frame: Advanced Settings > Faster Voice Typing. While a clip is being
+## worked out, the headset's depth model runs only this often, so the speech
+## model has the processor: with Headset: Detail running, the Small speech
+## model took about half the clip's length to type it out (7h log: 15.8 s for
+## 30 s of speech) against about a third without a depth model, and running
+## the depth model a little less often (Hz Cap Auto) made no difference.
+const VOICE_DEPTH_RATE := 4
+## No clip takes this long (the longest is 30 s of speech, about 16 s of work):
+## past it the model goes back to its rate even if voice typing never said
+## it had finished.
+const VOICE_WORK_MAX_MS := 45000
+var _voice_working := false
+var _voice_working_since_ms := 0
+
+func voice_easing_depth() -> bool:
+	return _voice_working and Time.get_ticks_msec() - _voice_working_since_ms < VOICE_WORK_MAX_MS \
+		and main.settings.frame_voice_eases_depth and frame_depth_available() \
+		and frame_depth_on_processor()
+
+## The speech model runs on the processor. A depth model on the graphics chip
+## is not in its way (7j: 2.0 s for a sentence with the option off, as quick
+## as Detail with it on), so there is nothing to ease.
+func frame_depth_on_processor() -> bool:
+	return frame_depth_model() != FRAME_DEPTH_GPU_MODEL
+
+## Voice typing says when a clip starts and stops being worked out.
+func set_voice_working(working: bool) -> void:
+	if working == _voice_working:
+		return
+	var eased := voice_easing_depth()
+	_voice_working = working
+	_voice_working_since_ms = Time.get_ticks_msec()
+	if eased == voice_easing_depth() or not main.stream_backend:
+		return
+	# Down to voice typing's rate, or back to Auto's (sent afresh) or the chosen number.
+	_frame_depth_rate_sent = -1
+	main.stream_backend.set_depth_hz_cap(get_effective_hz_cap())
+
+## Steam Frame: Multi-Link, Wi-Fi only or Adapter only (FrameSecondLink).
+## Takes effect at once, with no restart: Meteor follows within a few seconds.
+func cycle_link_mode():
+	main.settings.frame_link_mode = (main.settings.frame_link_mode + 1) % FrameSecondLink.MODE_LABELS.size()
+	main.settings.frame_link_untold = not main.link_choice_reaches_meteor()
+	_save_setting(main._ui_second_link_btn, FrameSecondLink.MODE_LABELS[main.settings.frame_link_mode])
+	main.link_mode_changed()
+
+func toggle_voice_eases_depth():
+	var eased := voice_easing_depth()
+	main.settings.frame_voice_eases_depth = not main.settings.frame_voice_eases_depth
+	_save_setting(main._ui_voice_ease_btn, "On" if main.settings.frame_voice_eases_depth else "Off")
+	if eased != voice_easing_depth() and main.stream_backend:
+		main.stream_backend.set_depth_hz_cap(get_effective_hz_cap())
 
 func is_ai3d_adaptive_active() -> bool:
 	return main.settings.ai_3d_gpu_priority == AI3D_GPU_PRIORITY_ADAPTIVE \
@@ -903,6 +1143,9 @@ func is_ai3d_adaptive_active() -> bool:
 
 # Called once per second with the app/video frame-rate telemetry sample.
 func on_performance_sample(sample: Dictionary) -> void:
+	if frame_depth_auto():
+		_pace_frame_depth(sample)
+		return
 	if not is_ai3d_adaptive_active():
 		_ai3d_pacer.reset(_base_hz_cap())
 		return
@@ -1172,6 +1415,7 @@ func toggle_passthrough():
 	if not main.is_xr_active or not main.passthrough_supported:
 		main._log("[PASSTHROUGH] toggle ignored: is_xr_active=%s passthrough_supported=%s" % [str(main.is_xr_active), str(main.passthrough_supported)])
 		return
+	var fps_before := effective_stream_fps()
 	main.settings.passthrough_enabled = not main.settings.passthrough_enabled
 	main._log("[PASSTHROUGH] Begin enable=%s streaming=%s native=%s background=%d pcvr=%d" % [main.settings.passthrough_enabled, main.is_streaming, main.video_presentation.is_native_active(), main.settings.background_mode, main.pcvr_handover.state])
 	main._flush_log()
@@ -1179,6 +1423,7 @@ func toggle_passthrough():
 	_save_setting(main._ui_pt_btn, "On" if main.settings.passthrough_enabled else "Off")
 	main._log("[PASSTHROUGH] toggled to %s and saved" % str(main.settings.passthrough_enabled))
 	main._flush_log()
+	_follow_camera_limit(fps_before)
 	# AUTO_TABLE's tier/model/cap picks all key off passthrough_enabled (see
 	# get_auto_selection()) - and manual Fast's resolution cap does too, same
 	# table. Refresh the AI Model button immediately (was showing a stale
@@ -1192,6 +1437,13 @@ func toggle_passthrough():
 		main.ui_controller.update_stereo_shader()
 		_schedule_ai_3d_commit()
 
+# Steam Frame: is the screen a mesh in the 3D scene (curved, or Flat Screen:
+# 3D Scene) rather than a layer? For the [FRAME-COST] log line.
+func _screen_drawn_in_scene() -> bool:
+	if not main.device_is_steam_frame:
+		return false
+	return main.comp == null or not main.comp.in_use or main.comp.get("_frame_curve_active") == true
+
 func apply_passthrough(enable: bool):
 	if "pcvr_handover" in main and main.pcvr_handover.owns_workspace(): return
 	if "pcvr_test" in main and main.pcvr_test.is_exclusive(): return
@@ -1202,20 +1454,27 @@ func apply_passthrough(enable: bool):
 	var interface = XRServer.find_interface("OpenXR")
 	if not interface:
 		return
-	var fade_layer: bool = main.passthrough_fade.setup(main, main.xr_origin)
-	main.passthrough_fade.apply(enable, main.settings.passthrough_fade_pct)
+	# Steam Frame: SteamVR has no equirect layers. With Nightfall's own
+	# engine build the fade is the opacity of the scene's background colour
+	# (see PassthroughFade.setup_background()).
+	var fade: PassthroughFade = main.passthrough_fade
+	var fade_ready: bool = fade.setup(main, main.xr_origin)
+	if not fade_ready and main.device_is_steam_frame and FrameEngine.patch_level() >= FrameEngine.BACKGROUND_OPACITY:
+		fade_ready = fade.setup_background(main.world_env.environment)
 	if enable:
 		main.get_viewport().transparent_bg = true
 		main.world_env.environment.background_mode = Environment.BG_COLOR
-		# Without the fade layer, dim through the projection layer instead;
-		# that reaches the compositor only when Godot submits it.
-		var fade_alpha: float = 0.0 if fade_layer else main.settings.passthrough_fade_pct / 100.0
+		# With none of those, ask through the background colour anyway; it
+		# reaches the compositor only where the renderer keeps its opacity.
+		var fade_alpha: float = 0.0 if fade_ready else main.settings.passthrough_fade_pct / 100.0
 		main.world_env.environment.background_color = Color(0, 0, 0, fade_alpha)
 		interface.environment_blend_mode = XRInterface.XR_ENV_BLEND_MODE_ALPHA_BLEND
 	else:
 		interface.environment_blend_mode = XRInterface.XR_ENV_BLEND_MODE_OPAQUE
 		main.get_viewport().transparent_bg = false
 		apply_background(main.settings.background_mode)
+	fade.apply(enable, main.settings.passthrough_fade_pct)
+	main._log("[PASSTHROUGH] fade %d%% via %s" % [main.settings.passthrough_fade_pct, fade.method])
 
 func cycle_background():
 	main.settings.background_mode = (main.settings.background_mode + 1) % main.background_labels.size()
@@ -1249,7 +1508,8 @@ func cycle_cursor_mode():
 	_save_setting(main._ui_cursor_btn, main.cursor_labels[main.settings.cursor_mode])
 
 func cycle_steady():
-	main.settings.pointer_steady = (main.settings.pointer_steady + 1) % main.pointer_steady_labels.size()
+	var order: Array[int] = main.POINTER_STEADY_ORDER
+	main.settings.pointer_steady = order[(order.find(main.settings.pointer_steady) + 1) % order.size()]
 	main._reset_steady_filter()
 	_save_setting(main._ui_steady_btn, main.pointer_steady_labels[main.settings.pointer_steady])
 
@@ -1384,6 +1644,9 @@ func set_language(code: String):
 	main.settings.language = code
 	apply_language()
 	main.state_manager.save_state()
+	# Steam Frame: voice typing listens in the menu's language.
+	if main.get("voice_typing") != null and main.voice_typing.has_method("language_changed"):
+		main.voice_typing.language_changed()
 
 # Applies the saved language (or the OS language when none was chosen) and
 # refreshes text that was composed before the change.
@@ -1400,6 +1663,20 @@ func cycle_quick_start():
 
 # HDR is negotiated at launch (10-bit codec + hdrMode), so a live stream
 # restarts to pick it up, the same as a codec change.
+func reconnect_audio():
+	main._log("[AUDIO] Reconnect Stream pressed")
+	if main.settings.play_audio_on_pc:
+		main.settings.play_audio_on_pc = false
+		main.state_manager.save_state()
+	if main.is_streaming:
+		_schedule_stream_restart()
+
+func toggle_audio_on_pc():
+	main.settings.play_audio_on_pc = not main.settings.play_audio_on_pc
+	_save_setting(main._ui_audio_on_pc_btn, "On" if main.settings.play_audio_on_pc else "Off")
+	if main.is_streaming:
+		_schedule_stream_restart()
+
 func toggle_hdr():
 	main.settings.hdr_enabled = not main.settings.hdr_enabled
 	_save_setting(main._ui_hdr_btn, "On" if main.settings.hdr_enabled else "Off")
@@ -1433,15 +1710,69 @@ func _set_microphone(enabled: bool) -> void:
 	main.settings.microphone_enabled = enabled
 	_save_setting(main._ui_microphone_btn, "On" if enabled else "Off")
 
+const FRAME_VOLUME_STEPS: Array = [-60, -18, -12, -6, 0, 3, 6, 9, 12]
+
+## Steam Frame: Stream > Volume is a slider. Its first position is Mute; the
+## other twenty are 3 dB apart from -45 dB to +12 dB (Normal, 0 dB, at 80%),
+## the same steps the volume buttons and voice commands use.
+func set_volume(value: int, commit: bool) -> void:
+	var step: int = clampi(int(round(value / 5.0)), 0, 20)
+	main.settings.audio_boost_db = -60 if step == 0 else -48 + 3 * step
+	refresh_volume_btn()
+	apply_audio_boost()
+	if commit:
+		main.state_manager.save_state()
+
+## Shows the current volume on Stream > Volume, slider or plain button.
+func refresh_volume_btn() -> void:
+	if main.ui_controller:
+		main.ui_controller.refresh_mute_indicator()
+	var btn: Button = main._ui_audio_boost_btn
+	if btn == null:
+		return
+	if not btn.has_meta("slider"):
+		main.ui_controller.update_option_btn(btn, get_audio_boost_label())
+		return
+	var db: int = main.settings.audio_boost_db
+	var muted: bool = db <= -60
+	var step: int = 0 if muted else clampi(int(round((db + 48) / 3.0)), 1, 20)
+	main.ui_controller.set_slider_value(btn, step * 5, get_audio_boost_label(), muted)
+
 func cycle_audio_boost():
-	var values: Array = SettingsPersistence.AUDIO_BOOST_VALUES
+	var values: Array = FRAME_VOLUME_STEPS if main.device_is_steam_frame else SettingsPersistence.AUDIO_BOOST_VALUES
 	var idx = values.find(main.settings.audio_boost_db)
 	main.settings.audio_boost_db = values[(maxi(idx, 0) + 1) % values.size()]
 	_save_setting(main._ui_audio_boost_btn, get_audio_boost_label())
+	refresh_volume_btn()
 	apply_audio_boost()
 
 func get_audio_boost_label() -> String:
+	if main.settings.audio_boost_db <= -60:
+		return "Mute"
+	if main.settings.audio_boost_db < 0:
+		return "%d dB" % main.settings.audio_boost_db
 	return "Normal" if main.settings.audio_boost_db == 0 else "+%d dB" % main.settings.audio_boost_db
+
+## Steam Frame controller buttons: step the stream volume (shared with Stream > Volume).
+var _pre_mute_db := 0
+func step_volume(what: String) -> void:
+	var db: int = main.settings.audio_boost_db
+	match what:
+		"vol_up":
+			db = 0 if db <= -60 and _pre_mute_db == 0 else (_pre_mute_db if db <= -60 else mini(db + 3, 12))
+		"vol_down":
+			db = maxi((_pre_mute_db if db <= -60 else db) - 3, -45)
+		"mute":
+			if db <= -60:
+				db = _pre_mute_db
+			else:
+				_pre_mute_db = db
+				db = -60
+	main.settings.audio_boost_db = db
+	_save_setting(main._ui_audio_boost_btn, get_audio_boost_label())
+	refresh_volume_btn()
+	apply_audio_boost()
+	main.ui_controller.show_temporary_status("Volume: " + get_audio_boost_label(), 1.0)
 
 func get_audio_output_label() -> String:
 	return "AudioTrack" if main.settings.android_audio_output == 1 else "Native"
@@ -1452,6 +1783,34 @@ func cycle_audio_output():
 	apply_audio_boost()
 	if main.is_streaming:
 		_schedule_stream_restart()
+
+# Sometimes the host starts a stream without ever sending audio, and nothing
+# brings it back for that session. A restart always fixes it, so if no audio
+# packet has arrived a few seconds in, restart once on the user's behalf.
+var _audio_watch_seq := 0
+var _audio_auto_restarts := 0
+
+func start_audio_watchdog():
+	_audio_watch_seq += 1
+	var my_seq := _audio_watch_seq
+	await main.get_tree().create_timer(6.0).timeout
+	if my_seq != _audio_watch_seq or not main.is_streaming:
+		return
+	if not (main.stream_backend and main.stream_backend._v2):
+		return
+	var audio = main.stream_backend._v2.get_audio_renderer()
+	if not audio or not audio.has_method("get_packets_received"):
+		return
+	var packets: int = audio.get_packets_received()
+	if packets > 0:
+		_audio_auto_restarts = 0
+		return
+	if _audio_auto_restarts >= 2:
+		main._log("[AUDIO] Still no audio from the host after %d automatic restarts; giving up" % _audio_auto_restarts)
+		return
+	_audio_auto_restarts += 1
+	main._log("[AUDIO] No audio from the host 6s into the stream; restarting the stream (attempt %d)" % _audio_auto_restarts)
+	_schedule_stream_restart()
 
 func apply_audio_boost():
 	if not (main.stream_backend and main.stream_backend._v2):
@@ -1699,7 +2058,185 @@ func apply_filter():
 				cm.set_shader_parameter("gamma", gamma_val)
 
 func effective_stream_fps() -> int:
-	return pcvr_timing.effective_fps(main.settings.host.stream_fps)
+	var fps: int = pcvr_timing.effective_fps(main.settings.host.stream_fps)
+	return mini(fps, CAMERA_LIMIT_FPS) if camera_limit_active() else fps
+
+## Steam Frame: the rate Nightfall keeps to while a camera add-on shows the
+## room (see FramePassthroughCamera). At 90 Hz a frame has 11.1 ms, and
+## Nightfall's frame with the cameras on takes 9.5 at 1080p and 9.7 to 12.7 at
+## 1440p; at 144 Hz it has 6.9 (7a log). The user's own FPS choice stays as it
+## is and comes back when the limit lets go.
+const CAMERA_LIMIT_FPS := 90
+## Advanced Settings > Camera FPS Limit. Auto: while the add-on's camera is
+## the one running. On: whenever an add-on is fitted. Either only with
+## Passthrough on.
+const CAMERA_LIMIT_AUTO := 0
+const CAMERA_LIMIT_ON := 1
+const CAMERA_LIMIT_OFF := 2
+const CAMERA_LIMIT_LABELS := ["Auto", "On", "Off"]
+## Auto goes back to the chosen rate only after the add-on's camera has been
+## idle this long. Each change of rate restarts the stream.
+const CAMERA_RELEASE_MS := 20000
+## When the cameras change over by themselves, the stream is restarted this
+## long after a notice says so, to leave time to pause a game.
+const CAMERA_WARNING_SECONDS := 5.0
+## The stream rate apply_display_refresh_rate() last worked from: the running
+## stream's, while one runs.
+var applied_stream_fps := 0
+var _camera_restart_seq := 0
+## Which waiting restart (SettingsController's _restart_seq) the camera limit
+## asked for; -1 for none.
+var _camera_restart_at := -1
+## The add-on sensors last seen; refreshed by refresh_addon_cameras().
+var addon_cameras := PackedStringArray()
+## The add-on's camera is showing the room (or was a moment ago); kept up to
+## date by check_addon_in_use().
+var addon_in_use := false
+var _addon_idle_since_ms := -1
+
+func camera_limit_active() -> bool:
+	# addon_cameras is only ever filled on the Steam Frame.
+	if addon_cameras.is_empty() or not main.settings.passthrough_enabled or pcvr_timing.active:
+		return false
+	match main.settings.frame_camera_limit:
+		CAMERA_LIMIT_ON: return true
+		CAMERA_LIMIT_AUTO: return addon_in_use
+	return false
+
+## What the FPS button shows: the chosen rate, and the rate in force when the
+## camera limit holds it lower.
+func fps_label() -> String:
+	var chosen: int = main.settings.host.stream_fps
+	var now := effective_stream_fps()
+	return "%d" % chosen if now == chosen else "%d (%d now)" % [chosen, now]
+
+## Looks for a camera add-on again (it can be fitted while Nightfall runs).
+func refresh_addon_cameras() -> void:
+	if not main.device_is_steam_frame:
+		return
+	var found := FramePassthroughCamera.addons()
+	if found == addon_cameras:
+		return
+	var before := effective_stream_fps()
+	addon_cameras = found
+	addon_in_use = not found.is_empty() and FramePassthroughCamera.addon_running()
+	_addon_idle_since_ms = -1
+	main._log("[CAMERA] camera add-on: %s%s" % ["none" if found.is_empty() else ", ".join(found),
+		"" if found.is_empty() else (", showing the room" if addon_in_use else ", not running")])
+	if main._ui_camera_limit_btn:
+		main._ui_camera_limit_btn.visible = not found.is_empty()
+	_follow_camera_limit(before, true)
+
+## Whether the add-on's camera or the headset's own is running, looked at
+## every few seconds while an add-on is fitted.
+func check_addon_in_use() -> void:
+	if addon_cameras.is_empty():
+		return
+	var running := FramePassthroughCamera.addon_running()
+	var now_ms := Time.get_ticks_msec()
+	if running:
+		_addon_idle_since_ms = -1
+	elif _addon_idle_since_ms < 0:
+		_addon_idle_since_ms = now_ms
+	var in_use := FramePassthroughCamera.still_in_use(addon_in_use, running,
+		0 if _addon_idle_since_ms < 0 else now_ms - _addon_idle_since_ms, CAMERA_RELEASE_MS)
+	if in_use == addon_in_use:
+		return
+	var before := effective_stream_fps()
+	addon_in_use = in_use
+	main._log("[CAMERA] the add-on's camera is %s" % ("showing the room" if in_use else "no longer running"))
+	_follow_camera_limit(before, true)
+
+func cycle_camera_limit():
+	var before := effective_stream_fps()
+	main.settings.frame_camera_limit = (main.settings.frame_camera_limit + 1) % CAMERA_LIMIT_LABELS.size()
+	_save_setting(main._ui_camera_limit_btn, CAMERA_LIMIT_LABELS[main.settings.frame_camera_limit])
+	_follow_camera_limit(before)
+
+## Why the camera limit is not holding the rate down, for the notice.
+func _camera_limit_released_by() -> String:
+	if not main.settings.passthrough_enabled:
+		return "Passthrough off"
+	if addon_cameras.is_empty():
+		return "Camera add-on removed"
+	if main.settings.frame_camera_limit == CAMERA_LIMIT_OFF:
+		return "Camera FPS Limit off"
+	return "Native passthrough detected"
+
+## After anything the camera limit depends on has changed: says so and brings
+## the stream and the display to the rate now in force. `by_itself`: the
+## cameras changed over (or an add-on was fitted or taken off) with nobody
+## pressing anything, so the notice comes first and the restart a few seconds
+## later.
+func _follow_camera_limit(fps_before: int, by_itself: bool = false) -> void:
+	var now := effective_stream_fps()
+	if main._ui_fps_btn and not pcvr_timing.active:
+		main.ui_controller.update_option_btn(main._ui_fps_btn, fps_label())
+	if now == fps_before:
+		return
+	main._log("[CAMERA] rate %d -> %d fps%s (FPS is set to %d; passthrough %s, limit %s, add-on %s%s)" % [fps_before, now,
+		" in %.0fs" % CAMERA_WARNING_SECONDS if by_itself and main.is_streaming and now != applied_stream_fps else "",
+		main.settings.host.stream_fps, "on" if main.settings.passthrough_enabled else "off",
+		CAMERA_LIMIT_LABELS[main.settings.frame_camera_limit].to_lower(),
+		"none" if addon_cameras.is_empty() else ", ".join(addon_cameras),
+		"" if addon_cameras.is_empty() else (" showing the room" if addon_in_use else " not running")])
+	if not main.is_streaming:
+		_schedule_display_refresh()
+		return
+	if by_itself and now == applied_stream_fps:
+		# The cameras changed back before the restart that was announced: the
+		# stream already runs at this rate, so that restart is called off.
+		_camera_restart_seq += 1
+		main._log("[CAMERA] change called off: the stream is already at %d fps" % now)
+		if main.comp and main.comp.has_method("show_notice"):
+			main.comp.show_notice("Camera switch canceled: staying at %d fps." % now, 4.0)
+		return
+	var wait := CAMERA_WARNING_SECONDS if by_itself else 0.0
+	if main.comp and main.comp.has_method("show_notice"):
+		var when := " in %d seconds" % int(wait) if by_itself else ""
+		if camera_limit_active():
+			_camera_limit_told = true
+			main.comp.show_notice("%s: %d fps%s.\nAdvanced Settings > Camera FPS Limit changes this." % [
+				"Color camera detected" if by_itself else "Color camera passthrough", now, when], wait + 4.0)
+		else:
+			main.comp.show_notice("%s: back to %d fps%s." % [_camera_limit_released_by(), now, when], wait + 3.0)
+	_restart_for_camera_limit(now, wait)
+
+## Restarts the stream at `fps` after `wait` seconds, unless the limit has
+## changed again by then (that change brings its own restart) or the stream
+## already runs at that rate (the cameras changed over and back).
+func _restart_for_camera_limit(fps: int, wait: float) -> void:
+	_camera_restart_seq += 1
+	var seq := _camera_restart_seq
+	if wait > 0.0:
+		await main.get_tree().create_timer(wait).timeout
+	if seq != _camera_restart_seq or effective_stream_fps() != fps:
+		return
+	if main.is_streaming and applied_stream_fps != fps:
+		# A press of a button waits out the usual moment, so cycling through
+		# the option's choices doesn't restart the stream for each.
+		_schedule_stream_restart(0.0 if wait > 0.0 else 0.8)
+		_camera_restart_at = _restart_seq
+	elif _restart_pending and _restart_seq == _camera_restart_at:
+		# Cycled on to a choice that leaves the rate where the stream already
+		# is (Auto, On, Off in a row): the restart the earlier press asked for
+		# is called off (7l: such a pair of presses restarted a stream at the
+		# rate it already had). Only if no other setting has asked since.
+		cancel_stream_restart()
+		main._log("[CAMERA] restart called off: the stream is already at %d fps" % fps)
+
+## Says why the rate is lower than the FPS chosen. Also called when a stream
+## starts with the limit already in force, once a run.
+var _camera_limit_told := false
+
+func tell_camera_limit(only_once: bool = false) -> void:
+	if not camera_limit_active() or effective_stream_fps() >= main.settings.host.stream_fps:
+		return
+	if only_once and _camera_limit_told:
+		return
+	_camera_limit_told = true
+	if main.comp and main.comp.has_method("show_notice"):
+		main.comp.show_notice("Color camera passthrough: %d fps.\nAdvanced Settings > Camera FPS Limit changes this." % CAMERA_LIMIT_FPS, 6.0)
 
 func pcvr_timing_active() -> bool:
 	return pcvr_timing.active
@@ -1751,10 +2288,14 @@ func end_pcvr_timing() -> void:
 func refresh_pcvr_timing_ui() -> void:
 	if not main._ui_fps_btn: return
 	main._ui_fps_btn.disabled = pcvr_timing.active
-	main.ui_controller.update_option_btn(main._ui_fps_btn, "%d%s" % [effective_stream_fps(), " (PCVR)" if pcvr_timing.active else ""])
-	main._ui_fps_btn.set_meta(&"nightfall_tooltip", "Controlled by PCVR while active. Your desktop preference is restored on exit." if pcvr_timing.active else "Choose the stream frame rate and matching headset refresh rate.")
+	main.ui_controller.update_option_btn(main._ui_fps_btn, "%d (PCVR)" % effective_stream_fps() if pcvr_timing.active else fps_label())
+	main._ui_fps_btn.set_meta(&"nightfall_tooltip", "Controlled by PCVR while active. Your desktop preference is restored on exit." if pcvr_timing.active else MenuSchema.fps_tooltip())
 
-func apply_display_refresh_rate() -> bool:
+## `ask_steamvr`: on the Steam Frame, have SteamVR switch the display to the
+## wanted rate. Off at start-up, when the stream rate in hand is only the
+## default: the PC's own rate follows when its stream starts, and each switch
+## is a change of the display.
+func apply_display_refresh_rate(ask_steamvr: bool = true) -> bool:
 	if not main.is_xr_active:
 		return false
 	var interface = XRServer.find_interface("OpenXR")
@@ -1763,6 +2304,7 @@ func apply_display_refresh_rate() -> bool:
 	_refresh_request_seq += 1
 	var request_seq = _refresh_request_seq
 	var stream_fps := effective_stream_fps()
+	applied_stream_fps = stream_fps
 	var target_hz: float = float(stream_fps)
 	match stream_fps:
 		30: target_hz = 90.0
@@ -1773,6 +2315,11 @@ func apply_display_refresh_rate() -> bool:
 		# 72.0 if that's still true here.
 		60: target_hz = 120.0
 	if pcvr_timing.active: target_hz = pcvr_timing.display_hz
+	if main.device_is_steam_frame and not pcvr_timing.active and ask_steamvr:
+		target_hz = float(FrameDisplayRate.rate_for(target_hz))
+		await _frame_request_rate(interface, int(target_hz))
+		if request_seq != _refresh_request_seq:
+			return false
 	var available = interface.get_available_display_refresh_rates()
 	Engine.max_fps = int(ceil(pcvr_timing.display_hz)) if pcvr_timing.active else stream_fps
 	if available.is_empty():
@@ -1839,6 +2386,26 @@ func apply_display_refresh_rate() -> bool:
 		main._log("[REFRESH] %.0fHz unavailable; fell back to reported %.0fHz for %dfps stream, capped render to %dfps" % [target_hz, best, main.settings.host.stream_fps, main.settings.host.stream_fps])
 	return true
 
+## Steam Frame: has SteamVR switch this app's display rate (see
+## FrameDisplayRate) and waits for the display to follow.
+func _frame_request_rate(interface: XRInterface, want_hz: int) -> void:
+	var before: float = interface.get_display_refresh_rate()
+	if absf(before - want_hz) < 0.6:
+		return
+	var why := FrameDisplayRate.ask(want_hz)
+	if not why.is_empty():
+		main._log("[REFRESH] %d Hz not asked for: %s. Staying on %.0f Hz" % [want_hz, why, before])
+		return
+	var waited := 0.0
+	while waited < FrameDisplayRate.WAIT_SEC:
+		await main.get_tree().create_timer(0.2).timeout
+		waited += 0.2
+		if absf(interface.get_display_refresh_rate() - want_hz) < 0.6:
+			main._log("[REFRESH] SteamVR switched Nightfall from %.0f to %d Hz in %.1fs" % [before, want_hz, waited])
+			return
+	main._log("[REFRESH] asked SteamVR for %d Hz; the display still reports %.0f Hz after %.0fs" % [
+		want_hz, interface.get_display_refresh_rate(), FrameDisplayRate.WAIT_SEC])
+
 func _reported_refresh_fallback(available: Array, target_hz: float) -> float:
 	var best := 0.0
 	for rate in available:
@@ -1856,8 +2423,10 @@ func _reported_refresh_fallback(available: Array, target_hz: float) -> float:
 
 func cycle_fps():
 	if pcvr_timing.active: return
-	main.settings.host.stream_fps = next_fps_rate(main.settings.host.stream_fps, main.settings.high_refresh_rates)
-	_save_setting(main._ui_fps_btn, "%d" % main.settings.host.stream_fps)
+	main.settings.host.stream_fps = next_fps_rate(main.settings.host.stream_fps,
+		main.settings.high_refresh_rates and not main.device_is_steam_frame,
+		FRAME_MAX_STREAM_FPS if main.device_is_steam_frame else 0)
+	_save_setting(main._ui_fps_btn, fps_label())
 	if main.is_streaming:
 		_schedule_stream_restart()
 	else:
@@ -1867,8 +2436,16 @@ func cycle_fps():
 # High Refresh Rates is on.
 const HIGH_REFRESH_MIN := 200
 
-static func next_fps_rate(current: int, high_refresh_rates: bool) -> int:
-	var rates := STREAM_FPS_RATES.filter(func(rate): return high_refresh_rates or rate < HIGH_REFRESH_MIN)
+# The Steam Frame's display goes to 144 Hz. The rates above that in the list
+# are Quest 3 display rates; streamed to the Frame they only cost bitrate and
+# PC work for frames that are never shown.
+const FRAME_MAX_STREAM_FPS := 144
+
+## The rate after `current` in the list. `max_rate` above 0 leaves out the
+## rates beyond it.
+static func next_fps_rate(current: int, high_refresh_rates: bool, max_rate: int = 0) -> int:
+	var rates := STREAM_FPS_RATES.filter(func(rate):
+		return (high_refresh_rates or rate < HIGH_REFRESH_MIN) and (max_rate <= 0 or rate <= max_rate))
 	var idx := rates.find(current)
 	if idx < 0:
 		# A hidden rate, or one no longer offered: continue from the next lower one.
@@ -1890,6 +2467,30 @@ func _schedule_display_refresh():
 	await main.get_tree().create_timer(0.8).timeout
 	if _display_refresh_seq == my_seq and not main.is_streaming:
 		apply_display_refresh_rate()
+
+## Steam Frame: PT Fade as a slider, 0-100% in 5% steps.
+func set_passthrough_fade(value: int, commit: bool) -> void:
+	main.settings.passthrough_fade_pct = clampi(int(round(value / 5.0)) * 5, 0, 100)
+	refresh_passthrough_fade_btn()
+	if main.settings.passthrough_enabled and main.is_xr_active:
+		# While dragging only the fade itself changes; letting go runs the
+		# full passthrough set-up once (and logs it).
+		if commit:
+			apply_passthrough(true)
+		else:
+			main.passthrough_fade.apply(true, main.settings.passthrough_fade_pct)
+	if commit:
+		main.state_manager.save_state()
+
+func refresh_passthrough_fade_btn() -> void:
+	var btn: Button = main._ui_pt_fade_btn
+	if btn == null:
+		return
+	var pct: int = main.settings.passthrough_fade_pct
+	if btn.has_meta("slider"):
+		main.ui_controller.set_slider_value(btn, pct, PassthroughFade.label(pct))
+	else:
+		main.ui_controller.update_option_btn(btn, PassthroughFade.label(pct))
 
 func cycle_passthrough_fade():
 	main.settings.passthrough_fade_pct = PassthroughFade.next_fade(main.settings.passthrough_fade_pct)
@@ -1976,7 +2577,8 @@ func detect_polaris_host(ip: String, host_id: int):
 
 func cycle_bitrate():
 	main.settings.host.bitrate_idx += 1
-	if main.settings.host.bitrate_idx >= main.bitrate_labels.size():
+	# bitrate_labels[0] is "Auto" (idx -1), so the last real idx is size - 2.
+	if main.settings.host.bitrate_idx + 1 >= main.bitrate_labels.size():
 		main.settings.host.bitrate_idx = -1
 	var label = main.bitrate_labels[main.settings.host.bitrate_idx + 1] if main.settings.host.bitrate_idx >= 0 else "Auto"
 	_save_setting(main._ui_bitrate_btn, label)
@@ -1987,7 +2589,44 @@ func cycle_double_h():
 	main.state_manager.save_state()
 	_schedule_stream_restart()
 
+## Called on every change of session phase. Back to streaming with a restart
+## owed (see _restart_again): ask for it now, after the stream has settled.
+## Any phase other than streaming or restarting means the stream is gone, and
+## the next connection reads the settings afresh anyway.
+func on_session_phase(current: int) -> void:
+	if current == SessionLifecycle.Phase.RESTARTING:
+		return
+	var owed := _restart_again and current == SessionLifecycle.Phase.STREAMING
+	var end_host_session := _restart_again_ends_host_session
+	_restart_again = false
+	_restart_again_ends_host_session = false
+	if not owed:
+		return
+	await main.get_tree().create_timer(0.3).timeout
+	main._log("[RESTART] A stream setting changed during the last restart; restarting once more")
+	_schedule_stream_restart(0.8, 0.0, end_host_session)
+
+## Drops a stream restart that is still waiting out its pause (below), for
+## when the setting that asked for it has been put back.
+func cancel_stream_restart() -> void:
+	_restart_again = false
+	_restart_again_ends_host_session = false
+	if _restart_pending:
+		_restart_seq += 1
+		_restart_pending = false
+
+## A stream setting was changed while a restart was already under way: the
+## stream coming up was started with the old value, so one more restart is
+## owed once it is up. Before 6o the change was dropped (the button said
+## Bitrate 120 while the stream ran at 60 until something else restarted it).
+var _restart_again := false
+var _restart_again_ends_host_session := false
+
 func _schedule_stream_restart(debounce_seconds: float = 0.8, reconnect_delay: float = 0.0, end_host_session: bool = false):
+	if main.current_host_id >= 0 and main.session_lifecycle.is_restarting():
+		_restart_again = true
+		_restart_again_ends_host_session = _restart_again_ends_host_session or end_host_session
+		return
 	if not main.is_streaming or main.current_host_id < 0:
 		return
 	_restart_pending = true
@@ -2041,8 +2680,426 @@ func _schedule_stream_restart(debounce_seconds: float = 0.8, reconnect_delay: fl
 	# viewports or creating decoder/native-renderer resources.
 	await main.stream_manager.start_stream(main.current_host_id, main._selected_app_id)
 
+func hide_pc_cursor():
+	if main.xr_interaction:
+		main.xr_interaction.park_host_cursor()
+
+func set_glow_strength(value: int, commit: bool):
+	main.settings.ambient_strength = clampi(value, 0, 100)
+	main.ui_controller.set_slider_value(main._ui_glow_strength_btn, main.settings.ambient_strength)
+	if main.settings.ambient_mode > 0:
+		main.comp.apply_ambient_settings()
+	if commit:
+		main.state_manager.save_state()
+
+func set_glow_size(value: int, commit: bool):
+	main.settings.ambient_size = clampi(value, 0, 100)
+	main.ui_controller.set_slider_value(main._ui_glow_size_btn, main.settings.ambient_size)
+	if main.settings.ambient_mode > 0:
+		main.comp.apply_ambient_settings()
+		main.comp.refresh_frame_curve()
+	if commit:
+		main.state_manager.save_state()
+
+func recenter_view():
+	main.recenter_view()
+
+const HEAD_LOCK_LABELS := ["Off", "Level", "Tilt"]
+const HAPTICS_LABELS := ["Off", "Clicks", "Clicks + Hover"]
+
+# Menu button: Off -> Level -> Tilt -> Off.
+func toggle_head_lock():
+	set_head_lock((main.settings.head_lock + 1) % 3)
+
+# Button action and voice: on (last used style) / off.
+func switch_head_lock():
+	set_head_lock(0 if main.settings.head_lock > 0 else main.settings.head_lock_last_on)
+
+func set_head_lock(mode: int):
+	mode = clampi(mode, 0, 2)
+	main.settings.head_lock = mode
+	if mode > 0:
+		main.settings.head_lock_last_on = mode
+		main.capture_head_lock()
+	_save_setting(main._ui_head_lock_btn, HEAD_LOCK_LABELS[mode])
+	var msg := "Head Lock off: the screen stays where it is."
+	if mode == 1:
+		msg = "Head Lock on: the screen follows your view and stays upright."
+	elif mode == 2:
+		msg = "Head Lock on (Tilt): the screen follows your view and tilts with your head."
+	main.comp.show_notice(msg, 2.5)
+
+func show_voice_commands():
+	main.ui_controller.on_voice_commands_pressed()
+
+func toggle_voice_prefix():
+	main.settings.voice_require_prefix = not main.settings.voice_require_prefix
+	_save_setting(main._ui_voice_prefix_btn, "On" if main.settings.voice_require_prefix else "Off")
+	if main.ui_controller.has_method("refresh_voice_commands"):
+		main.ui_controller.refresh_voice_commands()
+
+## Advanced Settings > Voice Commands > Commands. Off: voice typing only types.
+func toggle_voice_commands():
+	main.settings.voice_commands = not main.settings.voice_commands
+	_save_setting(main._ui_voice_commands_btn, "On" if main.settings.voice_commands else "Off")
+	if main.ui_controller.has_method("refresh_voice_commands"):
+		main.ui_controller.refresh_voice_commands()
+
+## Advanced Settings > Logging. The launcher reads the saved choice when Nightfall starts and
+## either writes the run's log or doesn't, so a change shows next start.
+const LOGGING_STARTS := "Logging starts the next time Nightfall starts. Restart Nightfall to log this session's problem."
+const LOGGING_STOPS := "Logging stops the next time Nightfall starts."
+
+## What to say when Logging is switched: nothing when the choice is what this
+## run is already doing. The launcher decides at start whether a run is
+## logged, so the switch can't take effect before the next start, and the
+## tooltip alone didn't get that across (2026-11-18: a test run went
+## unlogged).
+static func logging_notice(wanted: bool, this_run_logs: bool) -> String:
+	if wanted == this_run_logs:
+		return ""
+	return LOGGING_STARTS if wanted else LOGGING_STOPS
+
+func toggle_logging():
+	main.settings.frame_logging = not main.settings.frame_logging
+	_save_setting(main._ui_logging_btn, "On" if main.settings.frame_logging else "Off")
+	var notice := logging_notice(main.settings.frame_logging, main._logging)
+	if not notice.is_empty() and main.comp:
+		main.comp.show_notice(Localization.t(notice), 6.0)
+
+func toggle_voice_confirm():
+	main.settings.voice_confirm = not main.settings.voice_confirm
+	_save_setting(main._ui_voice_confirm_btn, "On" if main.settings.voice_confirm else "Off")
+
+# Which speech model voice typing uses. Switching loads the other one, which
+# takes a second or two; a model that isn't installed is skipped with a notice.
+func cycle_voice_model():
+	var wanted: int = (main.settings.voice_model + 1) % VoiceTyping.MODEL_FILES.size()
+	if not VoiceTyping.size_installed(wanted):
+		main._log("[VOICE] Speech Model %s asked for, but %s isn't there" % [VoiceTyping.MODEL_LABELS[wanted], VoiceTyping.model_path(wanted)])
+		if main.comp:
+			main.comp.show_notice(Localization.t("The %s speech model isn't installed. Run install.sh again to download it.") % VoiceTyping.MODEL_LABELS[wanted], 4.0)
+		return
+	if main.voice_typing and main.voice_typing.is_busy():
+		if main.comp:
+			main.comp.show_notice("Voice typing is busy. Try again in a moment.", 2.5)
+		return
+	main.settings.voice_model = wanted
+	main._log("[VOICE] Speech Model set to %s" % VoiceTyping.MODEL_LABELS[wanted])
+	_save_setting(main._ui_voice_model_btn, VoiceTyping.MODEL_LABELS[wanted])
+	if main.voice_typing:
+		main.voice_typing.reload_model()
+
+func toggle_keep_room_position():
+	main.settings.keep_room_position = not main.settings.keep_room_position
+	_save_setting(main._ui_keep_room_btn, "Same Spot" if main.settings.keep_room_position else "In Front")
+
+# The Start Distance slider: its 20 steps are a quarter of a metre each, from
+# 1 m to 6 m.
+static func start_distance_from_slider(value: int) -> float:
+	return AppSettings.SCREEN_START_DISTANCE_MIN + clampi(value, 0, 100) / 5.0 * 0.25
+
+static func start_distance_to_slider(metres: float) -> int:
+	return clampi(int(round((metres - AppSettings.SCREEN_START_DISTANCE_MIN) / 0.25)) * 5, 0, 100)
+
+func set_screen_start_distance(value: int, commit: bool) -> void:
+	main.settings.screen_start_distance = start_distance_from_slider(value)
+	refresh_start_distance_btn()
+	if commit:
+		main.move_screens_to_distance(main.settings.screen_start_distance)
+		main.state_manager.save_state()
+
+# Advanced > Screen Size (Steam Frame): the main screen's width from the
+# menu, as a share of how far away it is, so the slider means the same at any
+# distance. It is also the way back for a screen whose corners are out of
+# reach. Slider 0 to 100 covers SCREEN_SIZE_MIN_PER_METRE to VRScreen's limit.
+const SCREEN_SIZE_MIN_PER_METRE := 0.3
+
+static func screen_width_from_slider(value: int, distance: float) -> float:
+	return distance * lerpf(SCREEN_SIZE_MIN_PER_METRE, VRScreen.MAX_WIDTH_PER_METRE, clampi(value, 0, 100) / 100.0)
+
+static func screen_width_to_slider(width: float, distance: float) -> int:
+	var share: float = inverse_lerp(SCREEN_SIZE_MIN_PER_METRE, VRScreen.MAX_WIDTH_PER_METRE, width / maxf(distance, 0.01))
+	return clampi(roundi(share * 20.0) * 5, 0, 100)
+
+func _screen_view_distance() -> float:
+	if main.primary_screen == null or main.xr_camera == null:
+		return AppSettings.SCREEN_START_DISTANCE_DEFAULT
+	return maxf(main.primary_screen.global_position.distance_to(main.xr_camera.global_position), 0.5)
+
+func set_screen_size(value: int, commit: bool) -> void:
+	var s = main.primary_screen
+	if s == null or s.mesh_size.y <= 0.0:
+		return
+	s.set_width(screen_width_from_slider(value, _screen_view_distance()), s.mesh_size.x / s.mesh_size.y)
+	if main.comp and main.comp.available:
+		main.comp.update_layer_size()
+	refresh_screen_size_btn()
+	if commit:
+		reflow_grid_screens()
+		main.state_manager.save_state()
+		main._log("[SCREEN] size set from the menu: %.1f m wide" % s.mesh_size.x)
+
+func refresh_screen_size_btn() -> void:
+	var s = main.primary_screen
+	if s == null or main._ui_screen_size_btn == null:
+		return
+	main.ui_controller.set_slider_value(main._ui_screen_size_btn, screen_width_to_slider(s.mesh_size.x, _screen_view_distance()), "%.1f m" % s.mesh_size.x)
+
+func refresh_start_distance_btn() -> void:
+	var metres: float = main.settings.screen_start_distance
+	main.ui_controller.set_slider_value(main._ui_start_distance_btn, start_distance_to_slider(metres), "%.2f m" % metres)
+
+func toggle_keyboard_follows_screen():
+	main.settings.keyboard_follows_screen = not main.settings.keyboard_follows_screen
+	_save_setting(main._ui_kb_follow_btn, "On" if main.settings.keyboard_follows_screen else "Off")
+
+func toggle_haptics():
+	main.settings.haptics = (main.settings.haptics + 1) % 3
+	_save_setting(main._ui_haptics_btn, HAPTICS_LABELS[main.settings.haptics])
+	if main.settings.haptics > 0:
+		main.buzz(main.xr_interaction._active_hand, 0.5, 0.05)
+
+func cycle_mic_key_mode():
+	main.settings.mic_key_mode = 1 - main.settings.mic_key_mode
+	_save_setting(main._ui_mic_key_btn, "Windows" if main.settings.mic_key_mode == 1 else "Nightfall")
+
+## Advanced Settings > Reset Settings: a way back to the
+## defaults for someone who has changed too much to find it. Two presses within RESET_CONFIRM_SEC; then
+## the defaults are written and Nightfall restarts, because the sure way to
+## put every setting into force is the way a start does it.
+const RESET_CONFIRM_SEC := 6.0
+const RESET_ASK := "Press Reset Settings again to put everything in the menu back to Nightfall's defaults.\nYour paired PCs, button mappings and profiles stay. Nightfall will restart."
+const RESET_DONE := "Settings are back to Nightfall's defaults. Nightfall is restarting."
+var _reset_armed_until_msec := 0
+
+func reset_settings():
+	var now := Time.get_ticks_msec()
+	if now >= _reset_armed_until_msec:
+		_reset_armed_until_msec = now + int(RESET_CONFIRM_SEC * 1000.0)
+		main.ui_controller.update_option_btn(main._ui_reset_settings_btn, "Press again")
+		main._log("[STATE] Reset Settings pressed once: waiting for the second press")
+		if main.comp and main.comp.has_method("show_notice"):
+			main.comp.show_notice(RESET_ASK, RESET_CONFIRM_SEC)
+		await main.get_tree().create_timer(RESET_CONFIRM_SEC).timeout
+		if not main.state_manager.reset_done and Time.get_ticks_msec() >= _reset_armed_until_msec:
+			main.ui_controller.update_option_btn(main._ui_reset_settings_btn, "")
+		return
+	_reset_armed_until_msec = 0
+	main.state_manager.reset_to_defaults()
+	main.ui_controller.update_option_btn(main._ui_reset_settings_btn, "Done")
+	main._log("[STATE] Reset Settings: defaults written, per-PC settings removed; restarting")
+	if main.comp and main.comp.has_method("show_notice"):
+		main.comp.show_notice(RESET_DONE, 5.0)
+	await main.get_tree().create_timer(3.0).timeout
+	main.restart_app()
+
+func save_panel_spots():
+	main.settings.menu_spot = main.spot_from_node(main.ui_panel_3d)
+	var kb = main.virtual_keyboard
+	var saved_kb := false
+	if kb and (kb.visible or kb._has_saved_offset):
+		if not kb.visible:
+			# Hidden: it sits where it was last shown relative to the screen.
+			kb.anchor_to_saved_offset()
+		main.settings.keyboard_spot = main.spot_from_node(kb)
+		saved_kb = true
+	main.state_manager.save_state()
+	main.ui_controller.update_option_btn(main._ui_save_spots_btn, "Saved")
+	main._log("[SPOTS] Saved default menu%s spot. %s" % [" and keyboard" if saved_kb else "", spots_text()])
+
+## The saved default spots as they are kept: x, y, z in metres from the
+## viewer and yaw, pitch in radians. Written at start-up and on saving, so a
+## log shows where someone likes their menu and keyboard (how Nightfall's own
+## default spots were read out, 2026-11-17).
+func spots_text() -> String:
+	return "menu %s, keyboard %s" % [spot_text(main.settings.menu_spot), spot_text(main.settings.keyboard_spot)]
+
+static func spot_text(spot: Array) -> String:
+	if spot.size() != 5:
+		return "Nightfall's own"
+	return "[%.3f, %.3f, %.3f, %.3f, %.3f]" % [float(spot[0]), float(spot[1]), float(spot[2]), float(spot[3]), float(spot[4])]
+
+func reset_panel_spots():
+	main.settings.menu_spot = []
+	main.settings.keyboard_spot = []
+	main.state_manager.save_state()
+	main.ui_controller.update_option_btn(main._ui_reset_spots_btn, "Done")
+	main.ui_controller.update_option_btn(main._ui_save_spots_btn, "")
+	main._log("[SPOTS] Back to Nightfall's default spots")
+
+func toggle_curved_filter():
+	main.settings.frame_fast_filter = not main.settings.frame_fast_filter
+	_save_setting(main._ui_curved_filter_btn, "Fast" if main.settings.frame_fast_filter else "Full")
+
+# Steam Frame, experimental. Foveated rendering draws the part of each eye's
+# picture away from where you look at lower resolution. SteamVR offers it to
+# native apps (XR_FB_foveation with a Vulkan fragment density map, following
+# the eyes through XR_META_foveation_eye_tracked), and the engine applies it
+# when the viewport's shading rate follows the XR runtime. What it takes on
+# the Frame, found in 5v to 6f and in Godot's issue tracker:
+#  - An engine with Godot PR 124811 (issue 124141): stock 4.7 draws the scene
+#    in subpasses that keep the Frame's driver out of its tiled mode, and
+#    outside it the density map does nothing. The package's engine is built
+#    with that fix (steam-frame/engine/).
+#  - Tiled mode costs twice as much as direct drawing for this scene when
+#    nothing is foveated (13 ms against 6 ms), so with Foveation Off the
+#    launcher asks the driver for direct drawing (nightfall.sh).
+#  - "Subsampled images" off (package/override.cfg): SteamVR can't show them
+#    yet, the picture comes out warped.
+#  - Changing the level on a live eye picture (swapchain) stops foveation
+#    until restart (6f), with no error from SteamVR. The engine decides when
+#    it creates the eye pictures whether to ask for the runtime's foveation
+#    (only if the level is above 0 at that moment), and it creates them anew
+#    whenever their size changes. So a change of level here also changes the
+#    render size by a hair, which rebuilds the eye pictures with the new
+#    level: the same thing that happens at start. Tried first in 6k.
+# Measured on a 7.6 m curved screen with fade and glow: Low 7.4, Medium 7.2,
+# High 7.2 ms; direct drawing without foveation 6.2 ms.
+const FOVEATION_LABELS := ["Off", "Low", "Medium", "High"]
+## Two render sizes a hair apart; switching between them rebuilds the eye pictures.
+const FOVEATION_REBUILD_SCALES := [1.0, 0.999]
+## The level in force now.
+var foveation_active := 0
+var _foveation_rebuilds := 0
+var _foveation_logged := false
+
+func cycle_foveation():
+	main.settings.frame_foveation = (main.settings.frame_foveation + 1) % FOVEATION_LABELS.size()
+	_save_setting(main._ui_foveation_btn, FOVEATION_LABELS[main.settings.frame_foveation])
+	apply_foveation()
+
+## Steam Frame, experimental: Picture > Flat Screen Detail. Full draws the
+## flat screen's layer pictures at 4K; Stream Size at the stream's own size.
+func flat_screen_detail_label() -> String:
+	return "Stream Size" if main.settings.frame_layer_match_stream else "Full"
+
+func toggle_flat_screen_detail():
+	main.settings.frame_layer_match_stream = not main.settings.frame_layer_match_stream
+	_save_setting(main._ui_flat_detail_btn, flat_screen_detail_label())
+	apply_flat_screen_detail()
+
+## Puts the saved choice in force: at start (before any layer exists), and
+## whenever the option changes. Each screen is asked again for the size it
+## last wanted, which the setter pins to 4K or lets through; update_bezel()
+## then resizes the layer pictures, and the engine replaces their swapchains.
+func apply_flat_screen_detail() -> void:
+	if not main.device_is_steam_frame:
+		return
+	VRScreen.sf_match_stream = main.settings.frame_layer_match_stream
+	for s in main.screens:
+		s.comp_base_size = s.comp_base_requested
+	if main.comp and main.comp.available:
+		main.comp.update_bezel()
+	var primary: VRScreen = main.primary_screen
+	main._log("[PICTURE] flat screen detail %s (layer pictures %s)" % [flat_screen_detail_label().to_lower(),
+		str(primary.comp_viewport.size) if primary and primary.comp_viewport else "not made yet"])
+
+## Puts the saved level in force: at start, and whenever the option changes.
+func apply_foveation() -> void:
+	if not (main.device_is_steam_frame and main.is_xr_active):
+		return
+	var xr := XRServer.find_interface("OpenXR") as OpenXRInterface
+	if xr == null:
+		return
+	var level: int = main.settings.frame_foveation
+	if level > 0 and not xr.is_foveation_supported():
+		main._log("[PICTURE] foveation %s asked for, but the runtime doesn't offer it" % FOVEATION_LABELS[level].to_lower())
+		level = 0
+	if level == foveation_active:
+		if level == 0 and not _foveation_logged:
+			main._log("[PICTURE] foveation off")
+		_foveation_logged = true
+		return
+	_foveation_logged = true
+	foveation_active = level
+	set_driver_draw_mode(level > 0)
+	xr.foveation_dynamic = false
+	xr.foveation_level = level
+	main.get_viewport().vrs_mode = Viewport.VRS_XR if level > 0 else Viewport.VRS_DISABLED
+	# Rebuild the eye pictures so they are created for this level.
+	_foveation_rebuilds += 1
+	xr.render_target_size_multiplier = FOVEATION_REBUILD_SCALES[_foveation_rebuilds % FOVEATION_REBUILD_SCALES.size()]
+	main._log("[PICTURE] foveation %s (subsampled images %s, eye pictures rebuilt %d times, render scale %.3f)" % [
+		FOVEATION_LABELS[level].to_lower(), xr.foveation_with_subsampled_images, _foveation_rebuilds, xr.render_target_size_multiplier])
+
+## The graphics driver (Mesa Turnip) draws tiled or direct. Foveation needs
+## tiled; without foveation, tiled costs this scene twice the time. The
+## launcher points the driver at a file it re-reads while running
+## (TU_DEBUG_FILE, docs.mesa3d.org/drivers/freedreno.html) and writes it once
+## from the saved setting; this rewrites it when the setting changes.
+func set_driver_draw_mode(tiled: bool) -> void:
+	var path := OS.get_environment("NIGHTFALL_TU_DEBUG_FILE")
+	if path.is_empty():
+		return
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	if file == null:
+		main._log("[DRIVER] couldn't write %s" % path)
+		return
+	file.store_string("" if tiled else "sysmem")
+	file.close()
+	main._log("[DRIVER] %s" % ("left to choose (tiled, for foveation)" if tiled else "asked for direct drawing (sysmem)"))
+
+func toggle_flat_screen_mode():
+	main.settings.frame_flat_3d = not main.settings.frame_flat_3d
+	_save_setting(main._ui_flat_mode_btn, "3D Scene" if main.settings.frame_flat_3d else "Layer")
+	if main.comp and main.comp.in_use:
+		main.comp.switch_to_comp_layer()
+
+func toggle_icon_backdrop():
+	main.settings.icon_backdrop = not main.settings.icon_backdrop
+	_save_setting(main._ui_icon_backdrop_btn, "On" if main.settings.icon_backdrop else "Off")
+	for screen in main.screens:
+		main.screen_shortcuts.refresh_visuals(screen)
+
+func toggle_pointer_ray():
+	main.settings.show_pointer_ray = not main.settings.show_pointer_ray
+	_save_setting(main._ui_pointer_ray_btn, "On" if main.settings.show_pointer_ray else "Off")
+
+# Cursor Follow has three choices on the Steam Frame. "Capacitive Touch" is
+# following plus sleep_when_put_down: a controller no finger is on lets go of
+# the PC's cursor (ControllerTouch). Off and Standard never use the sensors.
+func cursor_follow_label() -> String:
+	if not main.settings.cursor_follow:
+		return "Off"
+	return "Capacitive Touch" if main.settings.sleep_when_put_down else "Standard"
+
+# The menu button: Off -> Standard -> Capacitive Touch -> Off.
+func cycle_cursor_follow():
+	if not main.settings.cursor_follow:
+		main.settings.cursor_follow = true
+		main.settings.sleep_when_put_down = false
+	elif not main.settings.sleep_when_put_down:
+		main.settings.sleep_when_put_down = true
+	else:
+		main.settings.cursor_follow = false
+	_cursor_follow_changed()
+
+# The Buttons tab action: on and off, keeping the kind of following.
+func toggle_cursor_follow():
+	main.settings.cursor_follow = not main.settings.cursor_follow
+	_cursor_follow_changed()
+
+func _cursor_follow_changed() -> void:
+	_save_setting(main._ui_cursor_follow_btn, cursor_follow_label())
+	main._log("[CURSOR] follow %s (let go when put down: %s)" % [cursor_follow_label().to_lower(),
+		"on" if main.settings.sleep_when_put_down else "off"])
+
+const GAMEPAD_LAYOUT_LABELS := ["Standard", "Swapped", "Custom"]
+
+func toggle_face_swap():
+	main.settings.gamepad_layout = (main.settings.gamepad_layout + 1) % 3
+	main.settings.gamepad_face_swap = main.settings.gamepad_layout == 1
+	_save_setting(main._ui_face_swap_btn, GAMEPAD_LAYOUT_LABELS[main.settings.gamepad_layout])
+
+func toggle_controller_models():
+	main.settings.show_controller_models = not main.settings.show_controller_models
+	_save_setting(main._ui_ctrl_models_btn, "On" if main.settings.show_controller_models else "Off")
+	main.update_frame_controller_models()
+
 func toggle_hand_tracking():
-	var modes := [0, 3, 1]
+	# Steam Frame: no "UI Only" (hands for menus only) - it made the menu hard to click.
+	var modes := [0, 1] if main.device_is_steam_frame else [0, 3, 1]
 	var current: int = main.effective_tracking_mode()
 	main.startup_hand_fallback.explicit_choice()
 	main.settings.tracking_mode = modes[(modes.find(current) + 1) % modes.size()]
@@ -2200,7 +3257,25 @@ func _clear_staged_preset_if_mismatched():
 
 # Call whenever the Monitors tab is opened, so its dropdowns reflect what's
 # actually live rather than whatever was last staged in a previous visit.
+# (Nothing called this until Steam Frame build 7z, in upstream 0.9.0 either:
+# the counts began at 0 in every app run, so with a virtual screen saved for
+# the host, setting Virtual to 0 and pressing Apply looked like no change. The
+# screen went from the headset, the host was never told, and the next stream
+# asked for it again: a second screen at every reconnect, 2026-11-16.)
 func sync_staged_from_current_layout():
+	# An Apply is waiting for its new stream: the layout is still the old one,
+	# and what is staged is what that stream was asked for.
+	if main._pending_monitor_apply:
+		return
+	if not main.is_streaming:
+		# Nothing is live. What counts is what the next stream will ask the
+		# host for, which is what was saved.
+		var saved: int = main.settings.host.virtual_display_count if main.settings.host.virtual_display_installed else 0
+		main._staged_virtual_count = saved
+		_last_applied_virtual_count = saved
+		if main.settings.host.virtual_only and saved > 0:
+			main._staged_physical_count = 0
+		return
 	var real_enabled = 0
 	var virtual_enabled = 0
 	for m in main.layout.monitors:
@@ -2443,6 +3518,39 @@ func reflow_grid_screens():
 # new set, and finish_pending_monitor_apply() (called from there) finishes the
 # job - adding virtual placeholders (never reported by any real manifest) and
 # positioning every screen per the staged preset.
+## The layout to show when an Apply restarts nothing and the host can make
+## real virtual displays: `target` without the client's stand-ins for virtual
+## monitors (a real one arrives with the next session's manifest; a stand-in
+## would show a copy of the whole frame meanwhile).
+##
+## `keep_live_virtual`: the number of virtual monitors is unchanged, so the
+## host's own virtual displays already in the stream (`live`) stay. This Apply
+## then only changes where the screens sit (a layout picture). Before 6q they
+## were stripped as well: picking a layout made every virtual screen vanish,
+## and only changing their number brought them back (seen on the Frame, 6p).
+static func layout_without_placeholders(target: ScreenLayout, live: ScreenLayout, keep_live_virtual: bool) -> ScreenLayout:
+	var result := ScreenLayout.new()
+	result.version = target.version
+	result.source = target.source
+	result.frame_size = target.frame_size
+	result.desktop_bounds = target.desktop_bounds
+	result.any_selection = target.any_selection
+	for m in target.monitors:
+		if not m.hint.get("virtual", false):
+			result.monitors.append(m)
+	if keep_live_virtual and live != null:
+		for m in live.monitors:
+			if m.hint.get("virtual", false) and m.enabled:
+				result.monitors.append(m)
+	return result
+
+## Whether Apply has a change of virtual screens to tell the host about:
+## the staged count differs from the one last applied, or from the one saved
+## for the next stream (which is what that stream asks the host for, whatever
+## this app run has applied or the host has made).
+static func virtual_count_changed(staged: int, last_applied: int, saved: int, vdd_available: bool) -> bool:
+	return staged != last_applied or (vdd_available and staged != saved)
+
 func apply_staged_monitor_config():
 	var target = _build_staged_layout()
 	if target == null:
@@ -2459,9 +3567,10 @@ func apply_staged_monitor_config():
 	var real_changed = old_real_ids != new_real_ids
 	main._log("[LAYOUT] apply_staged_monitor_config: staged=%d+%dvirtual old_real=%s new_real=%s real_changed=%s streaming=%s" % [main._staged_physical_count, main._staged_virtual_count, str(old_real_ids), str(new_real_ids), str(real_changed), str(main.is_streaming)])
 
-	var virtual_changed = main._staged_virtual_count != _last_applied_virtual_count
-	main.settings.host.virtual_only = main._staged_physical_count == 0 and main._staged_virtual_count > 0
 	var vdd_available = main.settings.host.virtual_display_installed and main.stream_manager != null
+	var virtual_changed = virtual_count_changed(main._staged_virtual_count, _last_applied_virtual_count,
+		main.settings.host.virtual_display_count, vdd_available)
+	main.settings.host.virtual_only = main._staged_physical_count == 0 and main._staged_virtual_count > 0
 	# A virtual-display change restarts the stream itself (see the Meteor reply below): the host
 	# session has to end before a new virtual display can appear, and a plain restart resumes it.
 	var restart_via_meteor = virtual_changed and vdd_available and main.is_streaming
@@ -2512,16 +3621,7 @@ func apply_staged_monitor_config():
 			# Don't render placeholder — real virtual monitor arrives after stream restart.
 			# Strip synthetic virtual entries before applying so the user doesn't see a
 			# duplicate-frame screen in the interim.
-			var without_placeholders := ScreenLayout.new()
-			without_placeholders.version = target.version
-			without_placeholders.source = target.source
-			without_placeholders.frame_size = target.frame_size
-			without_placeholders.desktop_bounds = target.desktop_bounds
-			without_placeholders.any_selection = target.any_selection
-			for m in target.monitors:
-				if not m.hint.get("virtual", false):
-					without_placeholders.monitors.append(m)
-			apply_screen_layout(without_placeholders)
+			apply_screen_layout(layout_without_placeholders(target, main.layout, not virtual_changed))
 		else:
 			apply_screen_layout(target)
 		_apply_preset_positions_to_screens()
@@ -2599,6 +3699,16 @@ func save_current_as_preset():
 			"free_pos": [s.position.x, s.position.y, s.position.z],
 			"free_rot": [s.rotation.x, s.rotation.y, s.rotation.z],
 		})
+	# A grid arrangement that is already among the pictures is selected rather
+	# than saved again (Save with the screens side by side used to add a
+	# second, identical picture).
+	var existing := MonitorPresets.find_same_grid_layout(screens_data)
+	if existing != "":
+		main._staged_preset_id = StringName(existing)
+		if main._ui_status_label:
+			main.ui_controller.set_status("This layout is already saved")
+		main.ui_controller.update_monitor_tab()
+		return
 	var customs = MonitorPresets.load_custom_presets()
 	var id = MonitorPresets.next_custom_id(customs)
 	customs.append({

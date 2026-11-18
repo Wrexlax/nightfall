@@ -1,0 +1,264 @@
+{
+	"whisper": "it",
+	"on": [
+		"attivo",
+		"attiva",
+		"acceso",
+		"accesa",
+		"attivare",
+		"accendi",
+		"accendere"
+	],
+	"off": [
+		"disattivato",
+		"disattivata",
+		"spento",
+		"spenta",
+		"disattivare",
+		"spegni",
+		"spegnere"
+	],
+	"next": [
+		"successivo",
+		"successiva",
+		"prossimo",
+		"prossima",
+		"cambia"
+	],
+	"enable": [
+		"attiva",
+		"abilita"
+	],
+	"disable": [
+		"disattiva",
+		"disabilita"
+	],
+	"minus": [
+		"meno"
+	],
+	"plus": [
+		"più"
+	],
+	"to": [
+		"a",
+		"al",
+		"su"
+	],
+	"drop": [
+		"il",
+		"lo",
+		"la",
+		"i",
+		"gli",
+		"le",
+		"un",
+		"una",
+		"per favore",
+		"di",
+		"del",
+		"della",
+		"imposta",
+		"metti"
+	],
+	"commands": {
+		"recenter": [
+			"ricentra",
+			"ricentrare",
+			"centra",
+			"ricentra schermo"
+		],
+		"show menu": [
+			"mostra menu",
+			"apri menu"
+		],
+		"hide menu": [
+			"nascondi menu",
+			"chiudi menu"
+		],
+		"menu": [
+			"menu"
+		],
+		"show keyboard": [
+			"mostra tastiera",
+			"apri tastiera"
+		],
+		"hide keyboard": [
+			"nascondi tastiera",
+			"chiudi tastiera"
+		],
+		"keyboard": [
+			"tastiera"
+		],
+		"head lock on": [
+			"blocco testa attivo",
+			"blocca testa",
+			"blocco testa acceso"
+		],
+		"head lock off": [
+			"blocco testa disattivato",
+			"sblocca testa",
+			"blocco testa spento"
+		],
+		"volume up": [
+			"alza volume",
+			"volume su",
+			"più forte"
+		],
+		"volume down": [
+			"abbassa volume",
+			"volume giù",
+			"più piano"
+		],
+		"volume #": [
+			"volume #"
+		],
+		"mute": [
+			"muto",
+			"silenzia",
+			"audio spento"
+		],
+		"unmute": [
+			"riattiva audio",
+			"togli muto",
+			"audio acceso"
+		],
+		"curve #": [
+			"curvatura #"
+		],
+		"flat screen": [
+			"schermo piatto",
+			"piatto",
+			"senza curvatura"
+		],
+		"passthrough fade #": [
+			"oscura passthrough #",
+			"oscura stanza #"
+		],
+		"glow strength #": [
+			"intensità bagliore #"
+		],
+		"glow size #": [
+			"ampiezza bagliore #"
+		],
+		"separation #": [
+			"separazione #"
+		],
+		"convergence #": [
+			"convergenza #"
+		],
+		"select all": [
+			"seleziona tutto"
+		],
+		"copy": [
+			"copia"
+		],
+		"paste": [
+			"incolla"
+		],
+		"cut": [
+			"taglia"
+		],
+		"undo": [
+			"annulla"
+		],
+		"redo": [
+			"ripeti",
+			"ripristina"
+		],
+		"save": [
+			"salva"
+		],
+		"find": [
+			"cerca",
+			"trova"
+		],
+		"new tab": [
+			"nuova scheda"
+		],
+		"close tab": [
+			"chiudi scheda"
+		],
+		"close window": [
+			"chiudi finestra"
+		],
+		"switch window": [
+			"cambia finestra"
+		],
+		"show desktop": [
+			"mostra desktop"
+		],
+		"task manager": [
+			"gestione attività",
+			"task manager"
+		],
+		"start menu": [
+			"menu start",
+			"tasto windows"
+		],
+		"screenshot": [
+			"screenshot",
+			"cattura schermo"
+		],
+		"escape": [
+			"escape",
+			"esc"
+		],
+		"enter": [
+			"invio"
+		],
+		"tab key": [
+			"tasto tab",
+			"tabulazione"
+		],
+		"backspace": [
+			"backspace",
+			"cancella indietro"
+		],
+		"delete": [
+			"canc",
+			"elimina"
+		],
+		"page up": [
+			"pagina su"
+		],
+		"page down": [
+			"pagina giù"
+		]
+	},
+	"typing": {
+		"clear": [
+			"cancella"
+		],
+		"submit": [
+			"invia"
+		],
+		"new line": [
+			"nuova riga",
+			"a capo"
+		],
+		"new paragraph": [
+			"nuovo paragrafo"
+		],
+		"open parenthesis": [
+			"apri parentesi",
+			"aperta parentesi"
+		],
+		"close parenthesis": [
+			"chiudi parentesi",
+			"chiusa parentesi"
+		]
+	},
+	"help": [
+		"Di’ il nome di un pulsante e come deve essere: funziona così per ogni pulsante del menu",
+		"Il valore successivo del pulsante",
+		"Un pulsante senza scelta: solo il suo nome"
+	],
+	"list": {
+		"commands": "Comandi",
+		"menu": "Ogni pulsante del menu",
+		"typing": "Durante la dettatura",
+		"note": "Tieni premuto il tuo pulsante vocale e di’ un comando da solo.",
+		"note_prefix": "Inizia ogni comando con «Nightfall».",
+		"note_off": "I comandi vocali sono disattivati: tutto ciò che dici viene scritto."
+	}
+}

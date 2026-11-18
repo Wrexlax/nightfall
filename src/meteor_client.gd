@@ -44,6 +44,83 @@ static func probe(owner: Node, ip: String, sunshine_https_port: int) -> Dictiona
 		return {}
 	return parse_info(PackedByteArray(result[3]).get_string_from_utf8(), sunshine_https_port)
 
+## The Stream Link choice as Meteor has it: { "choice": 0 both links, 1 the
+## adapter first, 2 Wi-Fi only; "rev": the number of the last pick made in
+## its own menu }. Empty when it doesn't answer, or is too old to keep one.
+## From a Meteor that says so, also "depth": whether it offers depth now.
+## Asked every couple of seconds while a stream runs, so it has its own small
+## page that Meteor answers without writing to its log.
+static func link_pick(owner: Node, ip: String, sunshine_https_port: int) -> Dictionary:
+	if ip.is_empty() or is_link_local(ip):
+		return {}
+	var request := HTTPRequest.new()
+	request.timeout = PROBE_TIMEOUT_SEC
+	owner.add_child(request)
+	var host := "[%s]" % ip if ":" in ip else ip
+	if request.request("http://%s:%d/meteor/link" % [host, discovery_port(sunshine_https_port)]) != OK:
+		request.queue_free()
+		return {}
+	var result: Array = await request.request_completed
+	request.queue_free()
+	if result[0] != HTTPRequest.RESULT_SUCCESS or result[1] != 200:
+		return {}
+	return parse_link_pick(PackedByteArray(result[3]).get_string_from_utf8())
+
+## Steam Frame: has Meteor press a volume or playback key on the PC (Meteor
+## 0.9.0-sf13, "media-keys"; meteor/src/media_keys.rs says why the stream
+## can't carry them). `key` is one of MEDIA_KEYS' names. Meteor's answer when
+## it pressed the key: { "pressed": key, and from 0.9.0-sf14 "muted": whether
+## the PC's sound is muted now }; empty otherwise. Meteor only presses keys
+## for the headset whose stream it carries.
+const MEDIA_KEYS := ["mute", "volume-down", "volume-up", "next", "previous", "stop", "play-pause"]
+
+static func media_key_url(ip: String, sunshine_https_port: int, key: String) -> String:
+	var host := "[%s]" % ip if ":" in ip else ip
+	return "http://%s:%d/meteor/media?key=%s" % [host, discovery_port(sunshine_https_port), key]
+
+static func media_key(owner: Node, ip: String, sunshine_https_port: int, key: String) -> Dictionary:
+	if ip.is_empty() or is_link_local(ip) or key not in MEDIA_KEYS:
+		return {}
+	var request := HTTPRequest.new()
+	request.timeout = 2.0
+	owner.add_child(request)
+	if request.request(media_key_url(ip, sunshine_https_port, key), PackedStringArray(), HTTPClient.METHOD_POST) != OK:
+		request.queue_free()
+		return {}
+	var result: Array = await request.request_completed
+	request.queue_free()
+	if result[0] != HTTPRequest.RESULT_SUCCESS or result[1] != 200:
+		return {}
+	return parse_media_answer(PackedByteArray(result[3]).get_string_from_utf8(), key)
+
+static func parse_media_answer(body: String, key: String) -> Dictionary:
+	var json := JSON.new()
+	if json.parse(body) != OK or not json.data is Dictionary or json.data.get("pressed", "") != key:
+		return {}
+	var answer := {"pressed": key}
+	if json.data.get("muted", null) is bool:
+		answer["muted"] = json.data["muted"]
+	return answer
+
+static func parse_link_pick(body: String) -> Dictionary:
+	var json := JSON.new()
+	if json.parse(body) != OK:
+		return {}
+	var answer = json.data
+	if not answer is Dictionary or answer.get("service", "") != "nightfall-meteor":
+		return {}
+	var link = answer.get("link", null)
+	if not link is Dictionary or not link.has("choice") or not link.has("rev"):
+		return {}
+	var pick := {"choice": clampi(int(link["choice"]), 0, 2), "rev": clampi(int(link["rev"]), 0, 255)}
+	# 0.9.0-sf11: whether depth is offered at this moment.
+	if answer.get("depth", null) is bool:
+		pick["depth"] = answer["depth"]
+	# 0.9.0-sf14, to a streaming headset: whether the PC's sound is muted.
+	if answer.get("muted", null) is bool:
+		pick["muted"] = answer["muted"]
+	return pick
+
 ## Where the Meteor in front of a host with this HTTPS port answers.
 static func discovery_port(sunshine_https_port: int) -> int:
 	return sunshine_https_port + HTTPS_BELOW_BASE - DISCOVERY_BELOW_BASE

@@ -131,6 +131,8 @@ Array NightfallConfigManager::get_hosts() {
         if (config->has_section_key("hosts", uuid_key)) {
             host["uuid"] = config->get_value("hosts", uuid_key);
             host["hostname"] = config->get_value("hosts", prefix + "hostname", "");
+            // The user's own name for this connection; empty when not given.
+            host["name"] = config->get_value("hosts", prefix + "name", "");
             host["mac"] = config->get_value("hosts", prefix + "mac", "");
             host["localaddress"] = config->get_value("hosts", prefix + "localaddress", "");
             host["usb_address"] = config->get_value("hosts", prefix + "usb_address", "");
@@ -217,6 +219,21 @@ void NightfallConfigManager::remove_host(int index) {
         config->set_value("hosts", k, new_data[k]);
     }
     save_config();
+}
+
+// The user's own name for the server with this identity, if a saved record
+// has one. A new pairing replaces the server's record (below); this is how the
+// name gets carried over to the new one.
+String NightfallConfigManager::get_host_name(const String &server_unique_id) {
+    if (server_unique_id.is_empty()) return "";
+    Array hosts = get_hosts();
+    for (int i = 0; i < hosts.size(); i++) {
+        Dictionary h = hosts[i];
+        if (String(h.get("server_unique_id", "")) == server_unique_id) {
+            return h.get("name", "");
+        }
+    }
+    return "";
 }
 
 // An address:https_port pair can only be one server at a time, and a server
@@ -413,6 +430,7 @@ void NightfallConfigManager::_bind_methods() {
     ClassDB::bind_method(D_METHOD("add_host", "data"), &NightfallConfigManager::add_host);
     ClassDB::bind_method(D_METHOD("update_host", "index", "data"), &NightfallConfigManager::update_host);
     ClassDB::bind_method(D_METHOD("remove_host", "index"), &NightfallConfigManager::remove_host);
+    ClassDB::bind_method(D_METHOD("get_host_name", "server_unique_id"), &NightfallConfigManager::get_host_name);
     ClassDB::bind_method(D_METHOD("clear_hosts"), &NightfallConfigManager::clear_hosts);
 
     ClassDB::bind_method(D_METHOD("get_apps", "host_index"), &NightfallConfigManager::get_apps);

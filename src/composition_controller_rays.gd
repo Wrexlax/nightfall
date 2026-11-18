@@ -69,6 +69,10 @@ func update(enabled: bool, active: bool, camera_position: Vector3,
 		_set_hidden(right_layer)
 		_set_hidden(left_layer)
 		return
+	# Turned back on (Pointer Ray setting): restart the beam viewports that
+	# the disabled branch above stopped, or the layer stays blank.
+	_set_viewport_active(right_viewport, true)
+	_set_viewport_active(left_viewport, true)
 	if not active:
 		_set_hidden(right_layer)
 		_set_hidden(left_layer)

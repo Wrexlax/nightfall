@@ -1,6 +1,11 @@
 Nightfall Meteor for Windows x64
 ================================
 
+This is the Steam Frame port's build of Meteor (its version ends in -sf):
+an unofficial build, not made by Nightfall's author. Its source, and where
+to report a problem with it: https://github.com/Wrexlax/nightfall
+Where the text below says "Quest", read "headset".
+
 Keep this folder together and run nightfall-meteor.exe. Its tray icon opens
 the depth model, rate, microphone, and startup controls. Meteor starts with
 EdgePad 512x288. Video Depth Anything is offered as a verified download in

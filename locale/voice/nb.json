@@ -1,0 +1,236 @@
+{
+	"whisper": "no",
+	"on": [
+		"på",
+		"slå på"
+	],
+	"off": [
+		"av",
+		"slå av"
+	],
+	"next": [
+		"neste",
+		"bytt"
+	],
+	"enable": [
+		"aktiver"
+	],
+	"disable": [
+		"deaktiver"
+	],
+	"minus": [
+		"minus"
+	],
+	"plus": [
+		"pluss"
+	],
+	"to": [
+		"til"
+	],
+	"drop": [
+		"den",
+		"det",
+		"en",
+		"et",
+		"vennligst",
+		"takk",
+		"sett",
+		"still"
+	],
+	"commands": {
+		"recenter": [
+			"sentrer",
+			"sentrer skjerm",
+			"sentrer på nytt"
+		],
+		"show menu": [
+			"vis meny",
+			"åpne meny"
+		],
+		"hide menu": [
+			"skjul meny",
+			"lukk meny"
+		],
+		"menu": [
+			"meny"
+		],
+		"show keyboard": [
+			"vis tastatur",
+			"åpne tastatur"
+		],
+		"hide keyboard": [
+			"skjul tastatur",
+			"lukk tastatur"
+		],
+		"keyboard": [
+			"tastatur"
+		],
+		"head lock on": [
+			"hodelås på",
+			"lås hode"
+		],
+		"head lock off": [
+			"hodelås av",
+			"lås opp hode"
+		],
+		"volume up": [
+			"høyere",
+			"skru opp",
+			"volum opp"
+		],
+		"volume down": [
+			"lavere",
+			"skru ned",
+			"volum ned"
+		],
+		"volume #": [
+			"volum #"
+		],
+		"mute": [
+			"demp",
+			"lyd av",
+			"stille"
+		],
+		"unmute": [
+			"opphev demping",
+			"lyd på"
+		],
+		"curve #": [
+			"krumning #"
+		],
+		"flat screen": [
+			"flat skjerm",
+			"flat",
+			"ingen krumning"
+		],
+		"passthrough fade #": [
+			"demp passthrough #",
+			"demp rommet #"
+		],
+		"glow strength #": [
+			"glødstyrke #"
+		],
+		"glow size #": [
+			"glødstørrelse #"
+		],
+		"separation #": [
+			"separasjon #"
+		],
+		"convergence #": [
+			"konvergens #"
+		],
+		"select all": [
+			"merk alt",
+			"velg alt"
+		],
+		"copy": [
+			"kopier"
+		],
+		"paste": [
+			"lim inn"
+		],
+		"cut": [
+			"klipp ut",
+			"klipp"
+		],
+		"undo": [
+			"angre"
+		],
+		"redo": [
+			"gjør om",
+			"gjenta"
+		],
+		"save": [
+			"lagre"
+		],
+		"find": [
+			"søk",
+			"finn"
+		],
+		"new tab": [
+			"ny fane"
+		],
+		"close tab": [
+			"lukk fane"
+		],
+		"close window": [
+			"lukk vindu"
+		],
+		"switch window": [
+			"bytt vindu"
+		],
+		"show desktop": [
+			"vis skrivebord"
+		],
+		"task manager": [
+			"oppgavebehandling"
+		],
+		"start menu": [
+			"startmeny",
+			"windows tast"
+		],
+		"screenshot": [
+			"skjermbilde"
+		],
+		"escape": [
+			"escape"
+		],
+		"enter": [
+			"enter"
+		],
+		"tab key": [
+			"tabulator",
+			"tab tast"
+		],
+		"backspace": [
+			"backspace",
+			"tilbake"
+		],
+		"delete": [
+			"delete",
+			"slett"
+		],
+		"page up": [
+			"side opp"
+		],
+		"page down": [
+			"side ned"
+		]
+	},
+	"typing": {
+		"clear": [
+			"fjern",
+			"slett"
+		],
+		"submit": [
+			"send"
+		],
+		"new line": [
+			"ny linje"
+		],
+		"new paragraph": [
+			"nytt avsnitt"
+		],
+		"open parenthesis": [
+			"parentes start",
+			"åpne parentes"
+		],
+		"close parenthesis": [
+			"parentes slutt",
+			"lukk parentes"
+		]
+	},
+	"help": [
+		"Si navnet på en knapp og hva den skal være: slik virker alle knapper i menyen",
+		"Knappens neste verdi",
+		"En knapp uten valg: bare navnet"
+	],
+	"list": {
+		"commands": "Kommandoer",
+		"menu": "Alle knapper i menyen",
+		"typing": "Mens du dikterer",
+		"note": "Hold inne stemmeknappen og si en kommando alene.",
+		"note_prefix": "Start hver kommando med «Nightfall».",
+		"note_off": "Stemmekommandoer er av: alt du sier, blir skrevet."
+	}
+}

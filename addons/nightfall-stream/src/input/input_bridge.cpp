@@ -121,7 +121,10 @@ int InputBridge::send_keyboard_event2(int godot_key, int key_action, int modifie
 }
 
 int InputBridge::send_utf8_text(const String &text) {
-    return LiSendUtf8TextEvent(text.utf8().get_data(), (unsigned int)text.length());
+    // The length is in bytes: text.length() counts characters, which cut off
+    // anything with accented or other non-ASCII letters.
+    CharString utf8 = text.utf8();
+    return LiSendUtf8TextEvent(utf8.get_data(), (unsigned int)utf8.length());
 }
 
 int InputBridge::send_controller_event(int button_flags, int left_trigger, int right_trigger, int left_stick_x, int left_stick_y, int right_stick_x, int right_stick_y) {

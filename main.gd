@@ -63,6 +63,12 @@ func get_hand_tracking_has_data() -> bool:
 		var tracker = XRServer.get_tracker(tracker_name)
 		if tracker and tracker is XRHandTracker:
 			if tracker.get_has_tracking_data():
+				# Steam Frame: SteamVR also reports a hand skeleton guessed from
+				# the controller's finger sensors. That isn't real hand tracking
+				# and fights the controller pointer, so only camera-tracked
+				# (unobstructed) hands take over there.
+				if device_is_steam_frame and tracker.hand_tracking_source == XRHandTracker.HAND_TRACKING_SOURCE_CONTROLLER:
+					continue
 				return true
 	return false
 @onready var xr_origin = $XROrigin3D
@@ -98,6 +104,13 @@ var was_right_clicking: bool = false
 var right_click_cooldown: float = 0.0
 var primary_controller_shortcuts = preload("res://src/primary_controller_shortcuts.gd").new()
 var _startup_reposition: int = 0  # 0=waiting for tracking, 1=centered, 2=positioning
+## Steam Frame: no saved state was found at this start (StateManager.load_state()).
+## The first time the screen is put in front of you it gets FrameDefaults' width.
+var frame_first_start := false
+var _saved_room_transform = null  # Transform3D of the main screen last session (Steam Frame)
+var _state_loaded := false  # load_state() has run; the launch placement waits for it
+var _startup_last_cam := Vector3.ZERO
+var _startup_still_frames := 0
 var _startup_cover: MeshInstance3D
 var _startup_ready: bool = false
 
@@ -232,6 +245,10 @@ var resolution_scale_options: Array = RESOLUTION_PRESETS
 # gd's QUEST2_AUTO_TABLE and main.gd's QUEST2_MAX_RESOLUTION.
 var device_is_quest2: bool = false
 var device_is_quest3: bool = false
+# Steam Frame (Build.DEVICE 'lepton_arm64_only'). Its SteamVR OpenXR runtime
+# lacks cylinder/equirect composition layers, so projectionless mode leaves
+# the welcome screen and menus invisible - render the normal 3D scene there.
+var device_is_steam_frame: bool = false
 # See device_is_quest2's comment. Quest 2's own per-eye display resolution
 # (~1832x1920) is already below Quest 3's, so there's no real benefit
 # requesting more than this regardless of AI-3D state - applied in
@@ -256,12 +273,31 @@ var bitrates: Array = [5, 10, 15, 20, 30, 40, 50, 60, 80, 100, 120]
 var bitrate_labels: Array = ["Auto", "5", "10", "15", "20", "30", "40", "50", "60", "80", "100", "120"]
 var display_refresh_rate: float = 72.0
 
-var cursor_labels: Array = ["Circle", "Pointer", "Hidden"]
-var pointer_steady_labels: Array = ["Off", "Low", "High", "One Euro"]
+# Third mode: the VR cursor is hidden on stream screens. On the Steam Frame it
+# is called "PC Cursor" and the PC's own cursor also follows the pointer there
+# (see XRInteraction.is_cursor_following()).
+var cursor_labels: Array = ["Circle", "Pointer", "PC Cursor" if MenuSchema._IS_FRAME else "Hidden"]
+# "Adaptive" is the published "1 euro" filter (Casiez, Roussel and Vogel, 2012);
+# upstream's label is "One Euro", which told the user nothing (2026-11-16).
+var pointer_steady_labels: Array = ["Off", "Low", "High", "Adaptive", "Max"]
+## The order Cursor Steady's button goes through them: Max follows High, and
+## One Euro (a different kind of smoothing) stays last. The numbers are the
+## saved ones, which is why Max, the newest, is 4.
+const POINTER_STEADY_ORDER: Array[int] = [0, 1, 2, 4, 3]
+const POINTER_STEADY_MAX := 4
+## Max: for hands that can't keep still (2026-11-16: a much
+## heavier level than High). The
+## pointer closes this share of the gap to where the hand points every
+## STEADY_MAX_SECONDS, whatever the display rate: a 2.5-a-second bounce comes
+## through at under a fifth of its size (High at 90 Hz: about half), and the
+## pointer trails a deliberate move by about a third of a second. First
+## figures, to be tuned by feel.
+const STEADY_MAX_SECONDS := 0.35
+const STEADY_MAX_DEAD_ZONE := 0.005
 # Touch-controller double-click gesture. Standard leaves host-side recognition
 # untouched; Chord maps a near-simultaneous trigger+grip press to two left
 # clicks. Hand tracking always retains its normal pinch-twice behaviour.
-var double_click_mode_labels: Array = ["Standard", "Chord"]
+var double_click_mode_labels: Array = ["Click Twice", "Trigger + Grip"]
 var _steady_hit: Vector3 = Vector3.ZERO
 var _steady_active: bool = false
 var _steady_factor: float = 0.3
@@ -316,6 +352,7 @@ var screen_manager: ScreenManager
 var settings_controller: SettingsController
 var state_manager: StateManager
 var controller_mapper: ControllerMapper
+var button_bindings: ButtonBindings
 var screen_shortcuts: ScreenShortcutBar
 var screen_tab_strip: ScreenTabStrip
 var comp: CompositionLayerManager
@@ -488,10 +525,15 @@ const LOG_PREVIOUS_PATH := "user://nightfall-previous.log"
 const LEGACY_LOG_PATH := "user://debug.log"
 var _log_lines: PackedStringArray = []
 var _log_file_initialized: bool = false
+## Steam Frame: the launcher says whether this run is logged (Advanced
+## Settings > Logging, as saved when Nightfall started). Run any other way,
+## Nightfall logs.
+var _logging := OS.get_environment("NIGHTFALL_LOGGING") != "0"
 var _log_session_rotated: bool = false
 var _log_flush_timer: float = 0.0
-var _ui_viewport_size := Vector2i(1200, 580)
-var _ui_mesh_size := Vector2(1.20, 0.58)
+# Steam Frame: a wider menu, so rows of five options fit.
+var _ui_viewport_size := Vector2i(1400, 580) if MenuSchema._IS_FRAME else Vector2i(1200, 580)
+var _ui_mesh_size := Vector2(1.40, 0.58) if MenuSchema._IS_FRAME else Vector2(1.20, 0.58)
 const UI_TOOLTIP_STRIP_PX := 102
 const UI_TOOLTIP_STRIP_METERS := 0.102
 var _ui_status_label: Label
@@ -530,13 +572,45 @@ var _ui_res_btn: Button
 var _ui_fps_btn: Button
 var _ui_bitrate_btn: Button
 var _ui_ctrl_type_btn: Button
+var _ui_face_swap_btn: Button
+var _ui_cursor_follow_btn: Button
+var _ui_pointer_ray_btn: Button
+var _ui_flat_mode_btn: Button
+var _ui_curved_filter_btn: Button
+var _ui_foveation_btn: Button
+var _ui_flat_detail_btn: Button
+var _ui_glow_strength_btn: Button
+var _ui_glow_size_btn: Button
+var _ui_save_spots_btn: Button
+var _ui_recenter_btn: Button
+var _ui_keep_room_btn: Button
+var _ui_start_distance_btn: Button
+var _ui_screen_size_btn: Button
+var _ui_voice_list_btn: Button
+var _ui_voice_prefix_btn: Button
+var _ui_voice_commands_btn: Button
+var _ui_voice_confirm_btn: Button
+var _ui_voice_model_btn: Button
+var _ui_voice_ease_btn: Button
+var _ui_second_link_btn: Button
+var _ui_kb_follow_btn: Button
+var eye_gaze: EyeGaze = null
+var _ui_head_lock_btn: Button
+var _ui_haptics_btn: Button
+var _ui_mic_key_btn: Button
+var _ui_reset_spots_btn: Button
+var _ui_hide_cursor_btn: Button
 var _ui_btn_toggle_btn: Button
 var _ui_primary_btn: Button
+var _ui_ctrl_models_btn: Button
+var frame_controller_models: Node3D = null
 var _ui_quick_start_btn: Button
 var _ui_audio_boost_btn: Button
+var _ui_icon_backdrop_btn: Button
 var _ui_audio_output_btn: Button
 var _ui_usb_link_btn: Button
 var _ui_hdr_btn: Button
+var _ui_audio_on_pc_btn: Button
 var _ui_host_cursor_btn: Button
 var _ui_sharpen_btn: Button
 # Picture tab (2026-08-31) - see ui_controller.gd's build_ui() for layout.
@@ -555,6 +629,8 @@ var _ui_idle_btn: Button
 var _ui_reconnect_btn: Button
 var _ui_mouse_follows_btn: Button
 var _ui_high_refresh_btn: Button
+var _ui_camera_limit_btn: Button
+var _ui_reset_settings_btn: Button
 var _ui_pt_fade_btn: Button
 var passthrough_fade := PassthroughFade.new()
 var _ui_exit_btn: Button
@@ -565,6 +641,7 @@ var _ui_log_btn: Button
 var _ui_stats_btn: Button
 var _ui_language_btn: Button
 var _ui_licences_btn: Button
+var _ui_logging_btn: Button
 var _ui_microphone_btn: Button
 var _ui_forget_meteor_btn: Button
 
@@ -778,16 +855,12 @@ const DEFAULT_PAIR_PORT := 47989
 # Host records saved before USB Link addresses carried a "%<iface>" zone hold
 # the bare link-local address; the zone never distinguishes two machines.
 func same_host_address(a: String, b: String) -> bool:
-	return a.get_slice("%", 0).to_lower() == b.get_slice("%", 0).to_lower()
+	return SavedHosts.same_address(a, b)
 
 # A saved host is reachable at its network address and, once seen over USB
 # Link, its usb_address too - either identifies the same machine.
 func host_matches_address(h: Dictionary, addr: String) -> bool:
-	for key in ["localaddress", "usb_address"]:
-		var a: String = h.get(key, "")
-		if not a.is_empty() and same_host_address(a, addr):
-			return true
-	return false
+	return SavedHosts.reached_at(h, addr)
 
 func parse_ip_port(text: String) -> Array:
 	# "[v6addr]:port", or a bare IPv6 address (2+ colons) with no port at all -
@@ -816,7 +889,15 @@ func parse_ip_port(text: String) -> Array:
 		return [text, DEFAULT_PAIR_PORT]
 	return [ip_part, port]
 
+# Steam Frame: what happens while SteamVR isn't showing Nightfall (the headset
+# off, or another app in front): see FrameSessionWatch.
+var _session_watch: FrameSessionWatch
+
 func _log(msg: String):
+	if not _logging:
+		return
+	if _session_watch != null and _session_watch.holds_back(msg):
+		return
 	_log_lines.append("[%s] %s" % [Time.get_datetime_string_from_system(false, true), msg])
 	push_warning("NF: %s" % msg)
 
@@ -913,6 +994,10 @@ func _reset_steady_filter():
 	_steady_last_usec = 0
 	_steady_last_frame = -1
 
+## How much of the gap Max closes in `seconds` (0 to 1).
+static func steady_max_share(seconds: float) -> float:
+	return 1.0 - exp(-maxf(seconds, 0.0) / STEADY_MAX_SECONDS)
+
 func _one_euro_alpha(cutoff_hz: float, delta: float) -> float:
 	var tau := 1.0 / (TAU * maxf(cutoff_hz, 0.001))
 	return 1.0 / (1.0 + tau / maxf(delta, 0.000001))
@@ -959,6 +1044,16 @@ func _get_steady_hit(raw: Vector3) -> Vector3:
 		_steady_last_usec = now_usec
 		_steady_last_frame = frame
 		return _steady_hit
+	if settings.pointer_steady == POINTER_STEADY_MAX:
+		var seconds := float(now_usec - _steady_last_usec) / 1000000.0
+		_steady_last_usec = now_usec
+		_steady_last_frame = frame
+		# A long gap: the ray left the screen. Start again where it is now.
+		if seconds <= 0.0 or seconds > 0.25:
+			_steady_hit = raw
+		elif (raw - _steady_hit).length() >= STEADY_MAX_DEAD_ZONE:
+			_steady_hit = _steady_hit.lerp(raw, steady_max_share(seconds))
+		return _steady_hit
 	var factor := 0.3 if settings.pointer_steady == 1 else 0.1
 	var dead_zone := 0.002 if settings.pointer_steady == 1 else 0.005
 	var delta = raw - _steady_hit
@@ -989,6 +1084,8 @@ func screen_cursor_mode(screen: VRScreen) -> int:
 	return settings.cursor_mode
 
 func _update_cursor_layer():
+	if comp == null:
+		return # comp is created after the first frames (native Steam Frame startup)
 	if not comp.in_use and not pcvr_handover.menu_only:
 		composition_pointers.hide_primary()
 		composition_pointers.hide_all_embedded(screens)
@@ -1075,6 +1172,8 @@ func _update_cursor_layer():
 			contact_dot.visible = false
 
 func _sync_composition_panels():
+	if comp == null:
+		return # comp is created after the first frames (native Steam Frame startup)
 	if not comp.in_use and not pcvr_handover.menu_only:
 		return
 	var keyboard_action := composition_panels.sync_transforms(ui_panel_3d, virtual_keyboard)
@@ -1085,6 +1184,8 @@ func _sync_composition_panels():
 			_restore_kb_material()
 
 func _update_laser_layers():
+	if comp == null:
+		return # comp is created after the first frames (native Steam Frame startup)
 	# Only the selected hand gets a beam. Keep both raycasts enabled for
 	# hit-testing so Auto can still discover and switch to the other hand.
 	var right_ray: RayCast3D = hand_raycast
@@ -1095,13 +1196,15 @@ func _update_laser_layers():
 		else:
 			left_ray = null
 	composition_controller_rays.update(
-		DEBUG_COMP_LASER,
+		DEBUG_COMP_LASER and settings.show_pointer_ray,
 		(comp.in_use or pcvr_handover.menu_only) and is_xr_active,
 		xr_camera.global_position,
 		right_ray,
 		left_ray)
 
 func _update_marker_layers(_delta: float):
+	if comp == null:
+		return # comp is created after the first frames (native Steam Frame startup)
 	composition_controller_markers.update(
 		DEBUG_COMP_MARKER and comp.in_use and is_xr_active,
 		xr_camera.global_transform.basis,
@@ -1115,6 +1218,8 @@ func set_comp_grab_bar_color(viewport: SubViewport, color: Color):
 	CompositionLayerManager.set_grab_bar_color(viewport, color)
 
 func _update_grab_bar_layers():
+	if comp == null:
+		return # comp is created after the first frames (native Steam Frame startup)
 	# One shared atlas per screen holds grab bar, shortcuts, corners and tabs. Only the
 	# screen being pointed at submits it (see ScreenShortcutBar.pointed_screen).
 	composition_screen_controls.update(
@@ -1129,6 +1234,15 @@ func exit_app():
 	if browser_prototype:
 		browser_prototype.stop()
 	get_tree().quit()
+
+## Steam Frame: closes Nightfall with the exit code that its launcher
+## (nightfall.sh) answers by starting it again. Started any other way,
+## Nightfall just closes.
+const RESTART_EXIT_CODE := 75
+func restart_app():
+	if browser_prototype:
+		browser_prototype.stop()
+	get_tree().quit(RESTART_EXIT_CODE)
 
 func disconnect_stream():
 	session_lifecycle.request_disconnect()
@@ -1166,7 +1280,9 @@ func restore_after_failed_connect(status_msg: String, welcome_name: String = "se
 	# Treat this as a complete non-streaming transition, including cancelling the
 	# still-armed Connect timeout and clearing restart state so the viewport reset
 	# below cannot take the native-restart preserve path.
+	_log("[DBG] restore_after_failed_connect 1")
 	session_lifecycle.fail()
+	_log("[DBG] restore_after_failed_connect 2")
 	_full_disconnect_cleanup(status_msg, welcome_name)
 
 func _bind_yuv_textures():
@@ -1203,7 +1319,22 @@ func _on_stream_started():
 	welcome_screen.reset_connect_button()
 	ui_controller.set_disconnect_visible(true)
 	_log("[STREAM] Connection started!")
+	if device_is_steam_frame:
+		settings_controller.tell_camera_limit(true)
+		_log_network(_network_watch.stream_started(stream_manager.stream_host_address))
+		refresh_second_link()
 	settings_controller.apply_audio_boost()
+	# Meteor's depth offer only counts once streaming, so refresh the AI 3D
+	# tab now (its "needs Meteor" notice otherwise stayed up until 3D was
+	# toggled).
+	if ui_controller:
+		ui_controller.update_3d_btn_state()
+	if device_is_steam_frame:
+		_meteor_depth_flag = -1
+		_meteor_depth_retries = 0
+		_say_if_meteor_offers_no_depth()
+		if ui_controller:
+			ui_controller.refresh_link_tip()
 	if not comp.in_use:
 		stream_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	welcome_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
@@ -1401,6 +1532,8 @@ func _on_stream_terminated(msg: String, err_code: int = 0):
 			screen_mesh.material_override.set_shader_parameter("tex_u", null)
 			screen_mesh.material_override.set_shader_parameter("tex_v", null)
 		return
+	if device_is_steam_frame and err_code != 0:
+		_log_network(_network_watch.stream_lost(stream_manager.stream_host_address))
 	if settings.auto_reconnect_enabled and err_code != 0:
 		_log("[RECONNECT] Keeping stream alive for auto-reconnect")
 		session_lifecycle.stream_terminated(true, err_code)
@@ -1421,45 +1554,68 @@ func _full_disconnect_cleanup(status_msg: String, welcome_name: String = "welcom
 	ui_controller.set_status(status_msg)
 	ui_controller.set_disconnect_visible(false)
 	_log("[STREAM] Full disconnect: %s" % status_msg)
+	_log("[DBG] _full_disconnect_cleanup 1")
 	welcome_screen.show_welcome_screen(welcome_name)
+	_log("[DBG] _full_disconnect_cleanup 2")
 	stream_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
+	_log("[DBG] _full_disconnect_cleanup 3")
 	_clear_comp_yuv_textures()
 	# _clear_comp_yuv_textures() shows the ". . ." loading indicator (meant
 	# for mid-restart, waiting-on-real-decoder-frames), but a full disconnect
 	# goes straight to the welcome screen instead of a fresh stream - hide it
 	# again so it doesn't blink away on top of the welcome screen content.
+	_log("[DBG] _full_disconnect_cleanup 4")
 	comp.hide_loading_dots()
-	comp_shader_mat.set_shader_parameter("main_texture", get_welcome_content_texture())
-	comp_shader_mat.set_shader_parameter("yuv_mode", 0)
+	_log("[DBG] _full_disconnect_cleanup 5")
+	if comp_shader_mat:
+		comp_shader_mat.set_shader_parameter("main_texture", get_welcome_content_texture())
+		comp_shader_mat.set_shader_parameter("yuv_mode", 0)
+	_log("[DBG] _full_disconnect_cleanup 6")
 	if comp_shader_mat_left:
 		comp_shader_mat_left.set_shader_parameter("main_texture", get_welcome_content_texture())
 		comp_shader_mat_left.set_shader_parameter("yuv_mode", 0)
+	_log("[DBG] _full_disconnect_cleanup 7")
 	if comp_shader_mat_right:
 		comp_shader_mat_right.set_shader_parameter("main_texture", get_welcome_content_texture())
 		comp_shader_mat_right.set_shader_parameter("yuv_mode", 0)
+	_log("[DBG] _full_disconnect_cleanup 8")
 	if not comp.in_use and screen_mesh.material_override is ShaderMaterial:
 		screen_mesh.material_override.set_shader_parameter("yuv_mode", 0)
 		screen_mesh.material_override.set_shader_parameter("tex_y", null)
 		screen_mesh.material_override.set_shader_parameter("tex_u", null)
 		screen_mesh.material_override.set_shader_parameter("tex_v", null)
+	_log("[DBG] _full_disconnect_cleanup 9")
 	stream_manager.teardown_v2_yuv_rect()
+	_log("[DBG] _full_disconnect_cleanup 10")
 	welcome_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	_log("[DBG] _full_disconnect_cleanup 11")
 	if comp.available:
 		_switch_to_comp_layer()
 		comp_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	else:
+		_log("[DBG] _full_disconnect_cleanup 12a mesh branch")
 		if not comp.in_use:
 			screen_mesh.material_override.set_shader_parameter("main_texture", get_welcome_content_texture())
+		_log("[DBG] _full_disconnect_cleanup 12b")
 		_switch_to_mesh_rendering()
+	_log("[DBG] _full_disconnect_cleanup 13")
 	if mouse_captured_by_stream:
 		input_handler.release_stream_mouse()
+	_log("[DBG] _full_disconnect_cleanup 14")
 	audio_player.stop()
+	_log("[DBG] _full_disconnect_cleanup 15")
 	ui_visible = false
+	_log("[DBG] _full_disconnect_cleanup 16")
 	_set_ui_visible(false)
+	_log("[DBG] _full_disconnect_cleanup 17")
 	composition_panels.hide_ui()
+	_log("[DBG] _full_disconnect_cleanup 18")
 	welcome_screen.reset_connect_button()
+	_log("[DBG] _full_disconnect_cleanup 19")
 	settings_controller.apply_passthrough(settings.passthrough_enabled)
+	_log("[DBG] _full_disconnect_cleanup 20")
 	welcome_screen.update_welcome_info()
+	_log("[DBG] _full_disconnect_cleanup 21")
 	stream_manager.resize_stream_viewport(1920, 1080)
 
 func _clear_comp_yuv_textures():
@@ -1468,6 +1624,11 @@ func _clear_comp_yuv_textures():
 func _ready():
 	session_lifecycle.phase_changed.connect(_on_session_phase_changed)
 	_log("=== Nightfall started ===")
+	# Steam Frame running natively (SteamOS, not Lepton/Android): the Frame is
+	# the only arm64 Linux headset SteamVR runs on, so treat linux.arm64 as it.
+	if OS.get_name() == "Linux" and Engine.get_architecture_name() == "arm64":
+		device_is_steam_frame = true
+		_log("[DEVICE] Linux arm64 - assuming native Steam Frame (SteamOS)")
 	Engine.max_fps = 0
 
 	_startup_cover = MeshInstance3D.new()
@@ -1518,12 +1679,15 @@ func _ready():
 		return
 
 	_init_xr(interface)
+	if device_is_steam_frame:
+		_session_watch = FrameSessionWatch.new()
+		_session_watch.setup(self, interface)
 	video_presentation.setup_native()
 	pcvr_test.setup()
 	# Composition providers must be registered before the OpenXR session starts.
 	# Only after registration may the refresh transition settle before layer and
 	# stream swapchains are allocated.
-	await settings_controller.apply_display_refresh_rate()
+	await settings_controller.apply_display_refresh_rate(false)
 	_init_backgrounds_and_comp_layer()
 	await get_tree().create_timer(0.5).timeout
 	screen_mesh.extra_cull_margin = 10.0
@@ -1553,6 +1717,8 @@ func _on_session_phase_changed(previous: int, current: int) -> void:
 	])
 	if ui_controller and screen_sources:
 		ui_controller.update_screen_sources()
+	if settings_controller:
+		settings_controller.on_session_phase(current)
 
 func _init_modules():
 	stream_manager = StreamManager.new(self)
@@ -1572,6 +1738,11 @@ func _init_modules():
 	settings_controller = SettingsController.new(self)
 	state_manager = StateManager.new(self)
 	controller_mapper = ControllerMapper.new(self)
+	if device_is_steam_frame:
+		controller_touch = ControllerTouch.new()
+		button_bindings = ButtonBindings.new(self)
+		voice_typing = VoiceTyping.new()
+		voice_typing.setup(self)
 	add_child(controller_mapper)
 	screen_shortcuts = ScreenShortcutBar.new(self)
 	screen_tab_strip = ScreenTabStrip.new(self)
@@ -1622,9 +1793,9 @@ func _init_android_setup():
 	settings_controller.enforce_ai3d_platform_lock(true)
 	if not [12, 15, 20, 30, 40, 60].has(settings.host.ai_3d_hz_cap):
 		settings.host.ai_3d_hz_cap = 20
-	if not [50, 75, 100].has(settings.host.ai_3d_separation_pct):
+	if not HostSettings.separation_valid(settings.host.ai_3d_separation_pct):
 		settings.host.ai_3d_separation_pct = 75
-	if not [30, 40, 50, 60, 70].has(settings.host.ai_3d_convergence_pct):
+	if not HostSettings.convergence_valid(settings.host.ai_3d_convergence_pct):
 		settings.host.ai_3d_convergence_pct = 50
 	settings.host.ai_3d_debug = clampi(settings.host.ai_3d_debug, 0, 4)
 
@@ -1903,8 +2074,8 @@ func add_screen(monitor_id: StringName, real_x_hint: float = INF, with_stereo: b
 		if is_streaming and stream_viewport:
 			var stream_size: Vector2i = stream_manager.get_current_stream_size() if stream_manager else stream_viewport.size
 			if stream_size.x > 0 and stream_size.y > 0:
-				s.comp_viewport.size = stream_size
 				s.comp_base_size = stream_size
+				s.comp_viewport.size = (s.comp_base_size + Vector2i(16, 16)) if device_is_steam_frame else stream_size
 	if not screen_registry.add(s):
 		push_error("Screen registry rejected prepared screen %s" % String(monitor_id))
 		s.queue_free()
@@ -2040,7 +2211,8 @@ func _init_stream_backend():
 		var device_codename = stream_backend.get_device_model()
 		device_is_quest2 = device_codename.to_lower() == "hollywood"
 		device_is_quest3 = device_codename.to_lower() == "eureka"
-		_log("[DEVICE] Build.DEVICE='%s' device_is_quest2=%s device_is_quest3=%s" % [device_codename, str(device_is_quest2), str(device_is_quest3)])
+		device_is_steam_frame = device_codename.to_lower().begins_with("lepton")
+		_log("[DEVICE] Build.DEVICE='%s' device_is_quest2=%s device_is_quest3=%s device_is_steam_frame=%s" % [device_codename, str(device_is_quest2), str(device_is_quest3), str(device_is_steam_frame)])
 	_client_codec_support = stream_backend.probe_all_video_formats()
 	# PyroWave (docs/plans/active/pyrowave-codec.md) isn't probed through
 	# probe_all_video_formats() - that queries FfmpegDecoder's own
@@ -2052,6 +2224,11 @@ func _init_stream_backend():
 	# A saved Raw preference falls back once server info arrives
 	# (stream_manager.gd's is_codec_available() check).
 	if OS.get_name() == "Android":
+		_client_codec_support["raw"] = false
+	# Native Steam Frame: the hardware decoder path handles H.264/HEVC only
+	# (FFmpeg here has no usable AV1 decoder), and Raw is local-capture only.
+	if OS.get_name() == "Linux" and device_is_steam_frame:
+		_client_codec_support["av1"] = false
 		_client_codec_support["raw"] = false
 	_log("[CODEC] Client support: h264=%s hevc=%s av1=%s raw=%s pyrowave=%s" % [
 		str(_client_codec_support.get("h264", false)),
@@ -2079,13 +2256,13 @@ func _init_stream_backend():
 	if v2_node.has_signal("reconnect_scheduled"):
 		v2_node.reconnect_scheduled.connect(func(attempt, max_attempts, delay_ms):
 			session_lifecycle.reconnect_scheduled()
-			ui_controller.set_status("Reconnecting %d/%d in %ds..." % [attempt, max_attempts, delay_ms / 1000])
+			ui_controller.set_status(Localization.t("Reconnecting %d/%d in %ds...") % [attempt, max_attempts, delay_ms / 1000])
 			_log("[RECONNECT] Attempt %d/%d in %dms" % [attempt, max_attempts, delay_ms])
 		)
 	if v2_node.has_signal("reconnect_requested"):
 		v2_node.reconnect_requested.connect(func(attempt, max_attempts):
 			_log("[RECONNECT] Relaunching session (attempt %d/%d)" % [attempt, max_attempts])
-			ui_controller.set_status("Reconnecting %d/%d..." % [attempt, max_attempts])
+			ui_controller.set_status(Localization.t("Reconnecting %d/%d...") % [attempt, max_attempts])
 			stream_manager.relaunch_for_reconnect()
 		)
 	if v2_node.has_signal("reconnect_failed"):
@@ -2126,9 +2303,20 @@ func _init_xr(interface):
 	_log("[XR] OpenXR render target: %dx%d" % [render_size.x, render_size.y])
 	_log("[XR] Blend modes: %s" % str(interface.get_supported_environment_blend_modes()))
 	if OS.get_name() == "Android" and RenderingServer.get_current_rendering_method() == "gl_compatibility" and interface.has_method("set_submit_projection_layer"):
-		interface.set_submit_projection_layer(false)
-		_log("[XR] Projectionless mode enabled; submitting composition layers only")
+		if device_is_steam_frame:
+			_log("[XR] Steam Frame detected; projectionless mode disabled, rendering normal 3D scene")
+		else:
+			interface.set_submit_projection_layer(false)
+			_log("[XR] Projectionless mode enabled; submitting composition layers only")
 
+	if device_is_steam_frame:
+		_setup_frame_controller_models()
+		# Give SteamOS's compositor a real full-screen window to send keys to.
+		var win_mode := DisplayServer.window_get_mode()
+		_log("[FOCUS] window mode %d size %s focused=%s display=%s" % [win_mode, str(DisplayServer.window_get_size()),
+			str(get_window().has_focus()), DisplayServer.get_name()])
+		# (2j tried forcing full screen and focus here; it made no difference to
+		# the volume runaway, and the window already has focus, so it's gone.)
 	var blend_modes = interface.get_supported_environment_blend_modes()
 	passthrough_supported = false
 	for bm in blend_modes:
@@ -2148,7 +2336,12 @@ func _init_xr(interface):
 
 	get_viewport().size = render_size
 	get_viewport().use_xr = true
-	if OS.get_name() == "Android":
+	# Steam Frame: no multisampling of the 3D scene. It costs 2 to 5 ms a
+	# frame for a difference nobody could see, and together with foveation it
+	# garbles the scene and takes ten times as long to draw (Godot issue
+	# 124165; 61 to 71 ms a frame in 6r). Builds 5n to 6t had it as the
+	# Picture option "Edge Smoothing".
+	if OS.get_name() == "Android" or device_is_steam_frame:
 		get_viewport().msaa_3d = Viewport.MSAA_DISABLED
 	else:
 		get_viewport().msaa_3d = Viewport.MSAA_2X
@@ -2169,6 +2362,8 @@ func _init_xr(interface):
 	# already correctly bound.
 	if interface.has_signal("user_presence_changed"):
 		interface.user_presence_changed.connect(_on_user_presence_changed)
+	if device_is_steam_frame and interface.has_signal("pose_recentered"):
+		interface.pose_recentered.connect(_on_pose_recentered)
 	settings.host.sbs_mode = 0
 	settings.host.ai_3d_speed = 0
 	# Establish the default 60fps -> 120Hz mapping before composition-layer
@@ -2179,6 +2374,16 @@ func _init_xr(interface):
 	# Applied and awaited by _ready() immediately after native-provider setup.
 	# Yielding here would let OpenXR start its session first, after which provider
 	# registration is rejected for the lifetime of this launch.
+
+# Steam Frame: the system recenter (Steam button) moves the room around you;
+# follow it by bringing the screen back in front.
+func _on_pose_recentered():
+	if _startup_reposition != -1:
+		return
+	_log("[VIEW] System recenter")
+	await get_tree().process_frame
+	await get_tree().process_frame
+	recenter_view()
 
 func _on_user_presence_changed(is_present: bool):
 	if not is_present:
@@ -2229,6 +2434,24 @@ func _init_backgrounds_and_comp_layer():
 
 func _init_post_xr():
 	state_manager.load_state()
+	_state_loaded = true
+	if voice_typing:
+		voice_typing.use_chosen_model()
+	if device_is_steam_frame:
+		_log("[TOUCH] Cursor Follow: %s; capacitive touch: %s" % [settings_controller.cursor_follow_label(), "on" if (settings.cursor_follow and settings.sleep_when_put_down) else "off"])
+		settings_controller.apply_foveation()
+		settings_controller.apply_flat_screen_detail()
+		# The Mobile renderer keeps the 3D scene in a 10-bit linear buffer
+		# with twice the range, so the darkest tones get few levels: below
+		# about 36 of 255 they are 2 to 6 steps apart. A screen drawn in the
+		# scene (curved, or Flat Screen: 3D Scene) showed that as bands in
+		# shadows and skin; a Layer screen never passes through the buffer.
+		# The engine's own remedy: a half-level pixel pattern added before
+		# the buffer is written, so the levels in between come out on average.
+		RenderingServer.material_set_use_debanding(true)
+		_log("[PICTURE] 3D scene debanding on")
+		_log_steamvr_app_settings()
+		_check_addon_cameras()
 
 	if comp.available:
 		_switch_to_comp_layer()
@@ -2248,6 +2471,37 @@ func _init_post_xr():
 		comp.update_cylinder_params()
 	_debug_log_cyl("init_post_xr")
 	_startup_ready = true
+	if device_is_steam_frame:
+		_announce_build()
+
+# Steam Frame: after installing a new build, say so once, so it's clear the
+# new version is the one running. The build name comes from the VERSION file
+# the installer copies next to the app.
+func _announce_build() -> void:
+	var f := FileAccess.open(OS.get_executable_path().get_base_dir() + "/VERSION", FileAccess.READ)
+	if f == null:
+		return
+	var build := f.get_as_text().strip_edges()
+	f.close()
+	if build.is_empty():
+		return
+	_log("[BUILD] Nightfall build %s" % build)
+	# Which folder the settings are in (the Frame's own since 8u).
+	_log("[BUILD] settings folder: %s" % OS.get_user_data_dir())
+	if device_is_steam_frame and settings_controller:
+		_log("[SPOTS] Saved default spots: %s" % settings_controller.spots_text())
+	var cfg := ConfigFile.new()
+	cfg.load("user://build.cfg")
+	var last: String = cfg.get_value("build", "last", "")
+	if last == build:
+		return
+	cfg.set_value("build", "last", build)
+	cfg.save("user://build.cfg")
+	await get_tree().create_timer(3.0).timeout
+	if last.is_empty():
+		comp.show_notice(Localization.t("Welcome to Nightfall (build %s).") % build, 5.0)
+	else:
+		comp.show_notice(Localization.t("Nightfall updated to build %s.") % build, 5.0)
 
 func _init_textures_and_ui():
 	var saved_ip = ""
@@ -2259,11 +2513,8 @@ func _init_textures_and_ui():
 			var saved_unique_id: String = save.get_value("connection", "server_unique_id", "")
 			if saved_ip != "":
 				%IPInput.text = saved_ip
-				# state_manager's host_state.cfg is keyed by the raw field text
-				# (see save_host_state()), so load_host_state() needs that same
-				# raw text - but localaddress/detect_polaris_host() need the
-				# parsed (port-suffix stripped) ip, see main.parse_ip_port().
-				state_manager.load_host_state(saved_ip)
+				# The field can hold "ip:port"; localaddress and
+				# detect_polaris_host() need the bare ip, see parse_ip_port().
 				var saved_host_ip: String = parse_ip_port(saved_ip)[0]
 				# Match by server_unique_id first (2026-08-27) - a host reached
 				# via NAT port-forwarding can share a bare IP with a different,
@@ -2276,10 +2527,10 @@ func _init_textures_and_ui():
 							current_host_id = h.id
 							break
 				if current_host_id < 0:
-					for h in config_mgr.get_hosts():
-						if host_matches_address(h, saved_host_ip):
-							current_host_id = h.id
-							break
+					current_host_id = SavedHosts.pick(config_mgr.get_hosts(), -1, saved_host_ip).get("id", -1)
+				# After the PC is known: its saved settings are filed under its
+				# identity, not its address (SavedHosts.settings_section()).
+				state_manager.load_host_state(saved_ip)
 				if current_host_id >= 0:
 					settings_controller.detect_polaris_host(saved_host_ip, current_host_id)
 				welcome_screen.update_welcome_info()
@@ -2340,6 +2591,10 @@ func _try_auto_connect():
 				await get_tree().create_timer(1.0).timeout
 				pcvr_test.auto_connect_pending = false
 				if pcvr_test.is_exclusive(): return
+				# Connect was pressed during that second: that connection stands.
+				if StreamManager.connection_under_way(session_lifecycle.phase):
+					_log("[AUTO-CONNECT] Left out: a connection was started by hand meanwhile")
+					return
 				stream_manager.start_stream(host_id, _selected_app_id)
 
 func _post_ready_check():
@@ -2371,8 +2626,127 @@ func primary_media_size() -> Vector2i:
 	if browser_content_active():
 		return browser_prototype.render_size
 	return Vector2i(stream_backend.get_video_width(), stream_backend.get_video_height())
+# Steam Frame fix: the GLES SurfaceTexture path puts already-converted RGB in
+# tex_y with no U/V planes. TextureUploader::update_colorspace() keeps resetting
+# color_matrix_type to the stream's YUV matrix on its own material, which the
+# shader then applies to RGB (white U/V samplers -> pink tint). Re-assert RGB
+# passthrough (3) every frame on every material that samples tex_y.
+var _sf_rgb_logged := false
+func _steam_frame_force_rgb_passthrough() -> void:
+	if not device_is_steam_frame or not is_streaming or not stream_backend:
+		return
+	var mats: Array = []
+	var bm = stream_backend.get_shader_material()
+	if bm is ShaderMaterial:
+		mats.append(bm)
+	for s in screens:
+		if s and s.material_override is ShaderMaterial:
+			mats.append(s.material_override)
+		if comp:
+			for m in comp.get_shader_mats(s):
+				if m is ShaderMaterial:
+					mats.append(m)
+	for m in mats:
+		if m.get_shader_parameter("tex_y") != null and m.get_shader_parameter("tex_u") == null and m.get_shader_parameter("color_matrix_type") != 3:
+			m.set_shader_parameter("color_matrix_type", 3)
+			if not _sf_rgb_logged:
+				_sf_rgb_logged = true
+				_log("[SF-COLOR] Forcing RGB passthrough on GLES SurfaceTexture material")
+
+# Steam Frame flat-screen sharpness: SteamVR has no cylinder layers, so the
+# screen is a mesh in the projection layer and gets resampled twice. For a FLAT
+# screen, show the stream picture as a quad composition layer instead, placed
+# over the screen as an underlay with a hole punched in the projection layer,
+# so menus, pointer and grab bar still draw in front. Curved keeps the mesh.
+#
+# The layer is bound to its OWN fixed-size SubViewport (a copy of
+# stream_viewport), never to stream_viewport itself: binding a layer takes over
+# the viewport's render target, and Nightfall resizes stream_viewport on every
+# resolution change, which crashed the GL thread (fix10/fix11). This viewport
+# is created once and never resized; the quad is sized to the screen mesh, so
+# the stretched copy keeps the stream's aspect ratio.
+const SF_QUAD_VP_SIZE := Vector2i(3840, 2160)
+var _sf_quad: OpenXRCompositionLayerQuad = null
+var _sf_vp: SubViewport = null
+var _sf_rect: TextureRect = null
+var _sf_quad_failed := false
+var _sf_quad_active := false
+var _sf_screen_layers := 1
+
+func _steam_frame_flat_quad_create() -> bool:
+	_sf_vp = SubViewport.new()
+	_sf_vp.name = "SteamFrameQuadViewport"
+	_sf_vp.size = SF_QUAD_VP_SIZE
+	_sf_vp.disable_3d = true
+	_sf_vp.transparent_bg = false
+	_sf_vp.render_target_update_mode = SubViewport.UPDATE_DISABLED
+	add_child(_sf_vp)
+	_sf_rect = TextureRect.new()
+	_sf_rect.name = "SteamFrameQuadCopy"
+	_sf_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	_sf_rect.stretch_mode = TextureRect.STRETCH_SCALE
+	_sf_rect.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+	_sf_rect.position = Vector2.ZERO
+	_sf_rect.size = Vector2(SF_QUAD_VP_SIZE)
+	_sf_rect.texture = stream_viewport.get_texture()
+	_sf_vp.add_child(_sf_rect)
+	_sf_quad = OpenXRCompositionLayerQuad.new()
+	_sf_quad.name = "SteamFrameFlatQuad"
+	_sf_quad.set_sort_order(-1)
+	_sf_quad.set_enable_hole_punch(true)
+	_sf_quad.set_alpha_blend(false)
+	_sf_quad.visible = false
+	xr_origin.add_child(_sf_quad)
+	if not _sf_quad.is_natively_supported():
+		_log("[SF-QUAD] Quad layer not supported; keeping mesh screen")
+		return false
+	_sf_quad.set_layer_viewport(_sf_vp)
+	_log("[SF-QUAD] Flat screen quad layer created (own %dx%d viewport)" % [SF_QUAD_VP_SIZE.x, SF_QUAD_VP_SIZE.y])
+	return true
+
+func _steam_frame_flat_quad_update() -> void:
+	if not device_is_steam_frame or _sf_quad_failed or not is_xr_active:
+		return
+	var s = primary_screen
+	var want: bool = is_streaming and s != null and s.curvature == 0 \
+		and stream_viewport != null and screens.size() == 1 \
+		and settings_controller != null and settings_controller.get_stereo_mode() == 0 \
+		and not (comp != null and comp.in_use)
+	if want and _sf_quad == null:
+		if not _steam_frame_flat_quad_create():
+			_sf_quad_failed = true
+			return
+	if _sf_quad == null:
+		return
+	if want:
+		var t: Transform3D = s.global_transform
+		_sf_quad.global_transform = Transform3D(t.basis.orthonormalized(), t.origin)
+		_sf_quad.set_quad_size(s.mesh_size)
+		if stream_viewport.render_target_update_mode != SubViewport.UPDATE_ALWAYS:
+			stream_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+		if _sf_vp.render_target_update_mode != SubViewport.UPDATE_ALWAYS:
+			_sf_vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+		if s.layers != 0:
+			_sf_screen_layers = s.layers
+			s.layers = 0
+		if not _sf_quad.visible:
+			_sf_quad.visible = true
+		if not _sf_quad_active:
+			_sf_quad_active = true
+			_log("[SF-QUAD] Flat screen now shown as quad layer (stream %dx%d)" % [stream_viewport.size.x, stream_viewport.size.y])
+	elif _sf_quad_active:
+		_sf_quad.visible = false
+		_sf_vp.render_target_update_mode = SubViewport.UPDATE_DISABLED
+		if s:
+			s.layers = _sf_screen_layers
+		_sf_quad_active = false
+		_log("[SF-QUAD] Back to mesh screen")
 
 func _process(delta):
+	# A frame that took this long is a visible stall; say so in the log, so
+	# "the picture went away for a moment" can be matched to what was going on.
+	if delta > 0.15 and is_streaming:
+		_log("[HITCH] a frame took %d ms" % int(delta * 1000.0))
 	if _startup_ready and is_xr_active: _process_startup_hand_fallback(delta)
 	if _startup_ready and controller_mapper: controller_mapper.update_available_hands(delta)
 	if welcome_screen: welcome_screen.process_auto_xr(delta)
@@ -2403,6 +2777,8 @@ func _process(delta):
 		browser_prototype.process()
 	if screen_sources:
 		screen_sources.process_secondary_browsers()
+	_steam_frame_force_rgb_passthrough()
+	_steam_frame_flat_quad_update()
 	if is_xr_active:
 		_process_hand_tracking(delta)
 
@@ -2428,6 +2804,15 @@ func _process(delta):
 	# beams, so a pickup takes effect in this frame rather than the next.
 	_process_controller_fade(delta)
 
+	if device_is_steam_frame and is_xr_active:
+		_process_head_lock(delta)
+		_process_click_haptics()
+		# Eye tracking isn't used for anything yet; Nightfall only notes in its
+		# log whether the headset provides it (for future features).
+		if eye_gaze == null:
+			eye_gaze = EyeGaze.new(self)
+		eye_gaze.log_status()
+
 	xr_interaction.process_pointer_frame(delta)
 	# A welcome click can enter exclusivity inside pointer dispatch. Finish
 	# this frame without ordinary code re-enabling composition/UI layers.
@@ -2446,6 +2831,7 @@ func _process(delta):
 		_update_hand_indicator_layers()
 		_update_grab_bar_layers()
 		_sync_comp_background()
+		comp.process_frame_curve()
 		comp.process_ambient(delta)
 
 	_process_background_follow()
@@ -2549,6 +2935,31 @@ func _hand_has_activity(hand: XRController3D, side: String) -> bool:
 	return true
 
 const HAND_REST_THRESHOLD := 4.0
+
+# Steam Frame, Cursor Follow: Capacitive Touch: a controller no hand is on rests at once
+# and stays resting however it moves (in a lap it moves with you), until a
+# finger is back on it. See ControllerTouch.
+var controller_touch: ControllerTouch = null
+var _hand_put_down := {"left": false, "right": false}
+
+func _hand_inactive_time(side: String, hand: XRController3D, inactive_time: float, delta: float) -> float:
+	var put_down := false
+	if controller_touch:
+		controller_touch.update(side, hand, delta)
+		# Only with Cursor Follow: Capacitive Touch. Off and Standard never
+		# use the touch sensors, whatever the Cursor Type.
+		put_down = settings.cursor_follow and settings.sleep_when_put_down \
+			and controller_touch.put_down(side)
+	if put_down != _hand_put_down[side]:
+		_hand_put_down[side] = put_down
+		_log("[TOUCH] %s controller: %s" % [side, "no finger on it: asleep" if put_down else "a finger is back on it: awake"])
+		if not put_down:
+			return 0.0  # awake at once, without waiting for it to be moved
+	if put_down:
+		return maxf(inactive_time + delta, HAND_REST_THRESHOLD)
+	if _hand_has_activity(hand, side):
+		return 0.0
+	return inactive_time + delta
 var right_hand_resting: bool = false
 var left_hand_resting: bool = false
 var _controller_pose_initialized: Dictionary = {}
@@ -2564,24 +2975,21 @@ func _process_controller_fade(delta: float):
 	if _controller_pose_initialized.is_empty():
 		_apply_hand_rest("right", true)
 		_apply_hand_rest("left", true)
-	if _hand_has_activity(right_hand, "right"):
-		xr_interaction._right_inactive_time = 0.0
-	else:
-		xr_interaction._right_inactive_time += delta
-	if _hand_has_activity(left_hand, "left"):
-		xr_interaction._left_inactive_time = 0.0
-	else:
-		xr_interaction._left_inactive_time += delta
+	xr_interaction._right_inactive_time = _hand_inactive_time("right", right_hand, xr_interaction._right_inactive_time, delta)
+	xr_interaction._left_inactive_time = _hand_inactive_time("left", left_hand, xr_interaction._left_inactive_time, delta)
 	_apply_hand_fade("right", xr_interaction._right_inactive_time, delta)
 	_apply_hand_fade("left", xr_interaction._left_inactive_time, delta)
 	# A controller placed down should rest regardless of where its last ray
 	# pointed (menu, keyboard, screen or empty space). Movement/buttons wake
 	# each controller independently on the next activity check.
-	_apply_hand_rest("right", xr_interaction._right_inactive_time >= HAND_REST_THRESHOLD)
-	_apply_hand_rest("left", xr_interaction._left_inactive_time >= HAND_REST_THRESHOLD)
+	_apply_hand_rest("right", xr_interaction._right_inactive_time >= HAND_REST_THRESHOLD \
+		or (tracking_guard != null and tracking_guard.is_lost("right")))
+	_apply_hand_rest("left", xr_interaction._left_inactive_time >= HAND_REST_THRESHOLD \
+		or (tracking_guard != null and tracking_guard.is_lost("left")))
 
 func _apply_hand_fade(side: String, inactive_time: float, delta: float):
-	var target_alpha = 1.0 if inactive_time < HAND_REST_THRESHOLD else 0.02
+	var lost: bool = tracking_guard != null and tracking_guard.is_lost(side)
+	var target_alpha = 1.0 if inactive_time < HAND_REST_THRESHOLD and not lost else 0.02
 	var new_alpha = move_toward(_hand_alpha[side], target_alpha, delta * 2.0)
 	_set_hand_alpha(side, new_alpha)
 
@@ -2663,28 +3071,66 @@ func _process_hand_tracking(_delta):
 func _process_button_input():
 	if not is_xr_active:
 		return
-	var side: String = xr_interaction._active_hand if controller_mapper and controller_mapper.effective_primary_hand() == ControllerMapper.PrimaryHand.AUTO else ("left" if controller_mapper and controller_mapper.effective_primary_hand() == ControllerMapper.PrimaryHand.LEFT else "right")
-	var hand = left_hand if side == "left" else right_hand
-	var other = right_hand if side == "left" else left_hand
-	var menu: bool = hand != null and hand.is_button_pressed("by_button")
-	var keyboard: bool = hand != null and hand.is_button_pressed("ax_button")
-	var stick: bool = hand != null and hand.is_button_pressed("primary_click")
-	var other_stick: bool = other != null and other.is_button_pressed("primary_click")
-	var blocked: bool = _is_using_hands or (controller_mapper != null and controller_mapper.is_active())
-	var trackpad_blocked: bool = virtual_keyboard != null and (virtual_keyboard.trackpad_active or virtual_keyboard.thumbstick_exit_flag)
-	for action in primary_controller_shortcuts.poll(side, menu, keyboard, stick, other_stick, blocked, trackpad_blocked):
-		screen_shortcuts.invoke(action)
-	if not stick and virtual_keyboard: virtual_keyboard.thumbstick_exit_flag = false
+	if button_bindings:
+		button_bindings.process()
+	if button_bindings and button_bindings.owns_buttons():
+		pass # A, B and stick clicks are handled by ButtonBindings (Steam Frame)
+	else:
+		var side: String = xr_interaction._active_hand if controller_mapper and controller_mapper.effective_primary_hand() == ControllerMapper.PrimaryHand.AUTO else ("left" if controller_mapper and controller_mapper.effective_primary_hand() == ControllerMapper.PrimaryHand.LEFT else "right")
+		var hand = left_hand if side == "left" else right_hand
+		var other = right_hand if side == "left" else left_hand
+		var menu: bool = hand != null and hand.is_button_pressed("by_button")
+		var keyboard: bool = hand != null and hand.is_button_pressed("ax_button")
+		var stick: bool = hand != null and hand.is_button_pressed("primary_click")
+		var other_stick: bool = other != null and other.is_button_pressed("primary_click")
+		var blocked: bool = _is_using_hands or (controller_mapper != null and controller_mapper.is_active())
+		var trackpad_blocked: bool = virtual_keyboard != null and (virtual_keyboard.trackpad_active or virtual_keyboard.thumbstick_exit_flag)
+		for action in primary_controller_shortcuts.poll(side, menu, keyboard, stick, other_stick, blocked, trackpad_blocked):
+			screen_shortcuts.invoke(action)
+		if not stick and virtual_keyboard: virtual_keyboard.thumbstick_exit_flag = false
 	if _startup_reposition >= 0 and is_xr_active:
 		match _startup_reposition:
 			0:  # Waiting for tracking to produce a meaningful camera position
 				if xr_camera.global_position.length_squared() > 0.01:
 					_startup_reposition = 1
-			1:  # Wait one more frame for tracking to stabilize
-				_startup_reposition = 2
+					_startup_last_cam = xr_camera.global_position
+					_startup_still_frames = 0
+			1:  # Wait for tracking to stabilize
+				if not device_is_steam_frame:
+					_startup_reposition = 2
+				else:
+					# Steam Frame: the first poses can be stale or jump while
+					# SteamVR settles, which left the screen off to the side.
+					# Wait for about a third of a second of steady head pose.
+					var cp: Vector3 = xr_camera.global_position
+					if cp.distance_to(_startup_last_cam) < 0.02:
+						_startup_still_frames += 1
+					else:
+						_startup_still_frames = 0
+					_startup_last_cam = cp
+					# ...and for the saved settings: _ready() loads them after
+					# an await, and this used to win the race, so Start
+					# Distance and At Launch: Same Spot were still at their
+					# defaults when the screen was placed (5j log).
+					if _startup_still_frames >= 30 and _state_loaded:
+						_startup_reposition = 2
 			2:  # Position screen in front of user
 				_reposition_screen_and_ui(true)
+				if device_is_steam_frame:
+					if settings.keep_room_position and _saved_room_transform is Transform3D:
+						_move_screen_group(_saved_room_transform)
+						_log("[POS] Keeping last session's room position")
+					else:
+						# In front of where you're looking, even lying down.
+						_move_screen_group(_transform_in_view(settings.screen_start_distance))
+						_log("[POS] Launch: screen placed where you're looking")
 				_startup_reposition = -1
+
+# Quitting: the depth receiver's thread must end before the scripts are
+# unloaded (it ended in a script error and an unfinished Thread otherwise).
+func _exit_tree() -> void:
+	if depth_estimator and depth_estimator.meteor:
+		depth_estimator.meteor.stop()
 
 func reset_primary_shortcuts() -> void:
 	primary_controller_shortcuts.reset()
@@ -2775,6 +3221,9 @@ func _process_stats(delta):
 	# of the toggle: know it's "Up" before trying to connect over it), not
 	# just while a stream using it is already running.
 	settings_controller.poll_usb_link_status(delta)
+	# Also ahead of it: the network is watched hardest after a stream is lost.
+	if device_is_steam_frame:
+		_log_network(_network_watch.tick(delta, is_streaming, stream_manager.stream_host_address))
 	if not is_streaming:
 		telemetry.record_frame(delta, browser_content_active() and browser_prototype.new_frame)
 		if telemetry.status_update_due(delta, 1.0) and ui_controller:
@@ -2794,6 +3243,8 @@ func _process_stats(delta):
 	var new_video_frame := stream_backend != null and stream_backend.consume_new_frame()
 	if video_presentation:
 		video_presentation.process_frame(new_video_frame)
+	if device_is_steam_frame:
+		_sample_frame_cost()
 	var frame_sample := telemetry.record_frame(delta, new_video_frame)
 	if not frame_sample.is_empty():
 		settings_controller.on_performance_sample(frame_sample)
@@ -2808,9 +3259,465 @@ func _process_stats(delta):
 			frame_sample["app_fps"], frame_sample["video_update_fps"],
 			100.0 * frame_sample["video_update_fps"] / maxf(frame_sample["app_fps"], 0.001),
 			frame_sample["video_updates"], frame_sample["app_frames"]])
+		if device_is_steam_frame:
+			_log_frame_cost()
+			_log_network(_network_watch.video_second(int(frame_sample["video_updates"]), stream_manager.stream_host_address))
+			_second_link_tick()
+			_power_watch.sample()
+			_power_wait -= 1
+			if _power_wait <= 0:
+				_power_wait = POWER_LOG_SECONDS
+				_log("[POWER] %s %s" % [Time.get_time_string_from_system(), _power_watch.line()])
+			_camera_check_wait -= 1
+			if _camera_check_wait <= 0:
+				_check_addon_cameras()
+			elif _camera_check_wait % CAMERA_IN_USE_SECONDS == 0:
+				settings_controller.check_addon_in_use()
 	if telemetry.status_update_due(delta):
 		stream_manager.update_stats()
 	_process_performance_overlay(delta)
+
+# Steam Frame: a camera add-on can be fitted or taken off while Nightfall
+# runs, so it is looked for again every 20 seconds (SettingsController's
+# Camera FPS Limit depends on it).
+const CAMERA_CHECK_SECONDS := 20
+## Which camera is running is looked at more often: the hitching starts the
+## moment the add-on's camera takes over.
+const CAMERA_IN_USE_SECONDS := 3
+var _camera_check_wait := 0
+
+func _check_addon_cameras() -> void:
+	_camera_check_wait = CAMERA_CHECK_SECONDS
+	settings_controller.refresh_addon_cameras()
+
+# Steam Frame: the stream's second link (FrameSecondLink).
+# The two links' names and the PC's address on the second, once this stream's
+# Meteor has been found there; the counts at the last log line; a number that
+# tells an old "is that the same Meteor?" answer from a current one.
+var _second_link_names: Array = []
+var _second_link_address := ""
+var _second_link_before: Dictionary = {}
+var _second_link_wait := 0.0
+var _second_link_generation := 0
+# While it isn't found: the reason last logged, the wait until the next look,
+# and whether a look is under way.
+const SECOND_LINK_RETRY_SECONDS := 5.0
+var _second_link_why := ""
+var _second_link_retry_wait := 0.0
+var _second_link_searching := false
+# Keeping the choice in step with Meteor's own menu: the number of the last
+# pick made there that this headset has seen (-1: not looked yet) and the
+# wait until the next look. (Whether the choice was changed here while Meteor
+# couldn't be told is kept with the settings: frame_link_untold.)
+const LINK_POLL_SECONDS := 2.0
+var _link_rev_seen := -1
+var _link_poll_wait := 0.0
+var _link_poll_busy := false
+# Whether Meteor said it was offering depth the last time it was asked (-1:
+# not asked during this stream yet), for following "Host depth" being
+# switched off and on in its menu while a stream runs.
+var _meteor_depth_flag := -1
+var _meteor_depth_busy := false
+# How many times in a row asking for the offer hasn't given what Meteor had
+# just said (no answer in time, most likely): asked again at the next look,
+# three times at most.
+var _meteor_depth_retries := 0
+# "Adapter first": which link carried the stream a second ago, for the notice
+# when that changes, and the counts then.
+var _link_carrier := ""
+var _link_carrier_counts: Dictionary = {}
+# "Adapter first" with a Meteor that takes "both links for now" (0.9.0-sf6):
+# the stream library judges the adapter's link itself. How many times it has
+# asked for both, and gone back to the adapter alone, that the log knows of;
+# and for how many seconds the log has waited to hear how quickly Wi-Fi's
+# copies came (-1: not waiting).
+var _link_holds_seen := 0
+var _link_alones_seen := 0
+var _link_hold_answer_wait := -1
+
+## A stream has started: finds this stream's Meteor on the adapter's link,
+## then asks it for whatever Stream Link says.
+func refresh_second_link() -> void:
+	if not device_is_steam_frame or stream_backend == null:
+		return
+	_second_link_generation += 1
+	stream_backend.set_second_link("")
+	_second_link_names = []
+	_second_link_address = ""
+	_second_link_why = ""
+	_second_link_retry_wait = SECOND_LINK_RETRY_SECONDS
+	_link_carrier = ""
+	if is_streaming:
+		_find_second_link()
+
+## Looks for this stream's Meteor on the adapter's link. At a stream's start,
+## and again every few seconds for as long as it isn't found: a stream that
+## starts out of the adapter's reach (7u log: a reconnect two rooms away) must
+## pick the adapter up when the headset comes back, not stay on Wi-Fi alone.
+func _find_second_link() -> void:
+	if _second_link_searching:
+		return
+	var generation := _second_link_generation
+	if not stream_manager.meteor_offers_second_link():
+		_second_link_not_found("this stream doesn't pass through Meteor" if stream_manager.meteor_address().is_empty()
+			else "the PC's Meteor doesn't offer it (it needs this port's 0.9.0-sf3 or later, or the original's 0.9.1)")
+		return
+	var found := FrameSecondLink.candidates(stream_manager.meteor_address(),
+		FrameNetworkWatch.file_text(FrameNetworkWatch.ROUTES), FrameNetworkWatch.file_text(FrameNetworkWatch.NEIGHBOURS))
+	if found.has("why"):
+		_second_link_not_found(String(found["why"]))
+		return
+	var key := stream_manager.meteor_key()
+	var candidates: PackedStringArray = found["candidates"]
+	_second_link_searching = true
+	for address in candidates:
+		var info: Dictionary = await stream_manager.probe_meteor_at(address)
+		if generation != _second_link_generation or not is_streaming:
+			_second_link_searching = false
+			return
+		# Only the stream's own Meteor is asked for anything: the same key.
+		if not key.is_empty() and MeteorClient.meteor_key(info) == key:
+			_second_link_searching = false
+			_second_link_address = address
+			_second_link_names = [found["first_iface"], found["iface"]]
+			_log("[LINK] %s this stream's Meteor also answers on %s (the stream itself is on %s)" % [
+				Time.get_time_string_from_system(), found["iface"], found["first_iface"]])
+			apply_link_mode()
+			return
+	_second_link_searching = false
+	_second_link_not_found("%d answered on %s, none of them this stream's Meteor" % [candidates.size(), found["iface"]])
+
+## Says why there is no second link, once for each reason: the search is
+## repeated every few seconds and would fill the log otherwise.
+func _second_link_not_found(why: String) -> void:
+	if why != _second_link_why:
+		_second_link_why = why
+		_log("[LINK] %s no second link: %s%s" % [Time.get_time_string_from_system(), why,
+			"" if not stream_manager.meteor_offers_second_link() else "; looking again every %d seconds" % int(SECOND_LINK_RETRY_SECONDS)])
+
+## Whether a change of Stream Link made now reaches Meteor: a stream is
+## running over both links to a Meteor that keeps the choice, and this headset
+## has seen its pick number (the pings carry that number, and Meteor only takes
+## the choice from a ping with the current one).
+func link_choice_reaches_meteor() -> bool:
+	return is_streaming and not _second_link_address.is_empty() and _link_rev_seen >= 0 \
+		and stream_manager.meteor_offers_link_sync()
+
+## A stream that passes through Meteor while Meteor isn't offering depth
+## (most likely "Host depth" switched off in its tray menu) used to leave
+## Meteor out of the Quality choices without a word: a whole session went on
+## finding that (2026-11-16). Say it, in the log and on screen.
+func _say_if_meteor_offers_no_depth() -> void:
+	if stream_manager.meteor_address().is_empty() or not MeteorDepthReceiver.is_supported() \
+			or not stream_manager.meteor_depth_info().is_empty():
+		return
+	_log("[METEOR] This stream passes through Meteor, but Meteor is not offering depth (\"Host depth\" switched off in its menu on the PC, or its depth model not loaded)")
+	if depth_estimator != null and depth_estimator.enabled:
+		comp.show_notice("Meteor's depth is off on the PC (its menu: Host depth). Using the headset's.", 6.0)
+
+## Meteor's address on the second link for the microphone and the depth maps
+## to use as well, "" when they are to stay on the stream's own link: no
+## second link, "Wi-Fi only", or a Meteor that would refuse them there.
+func side_channel_second_address() -> String:
+	if not is_streaming or _second_link_address.is_empty() or settings.frame_link_mode == FrameSecondLink.MODE_FIRST_ONLY \
+			or not stream_manager.meteor_offers_side_both():
+		return ""
+	return _second_link_address
+
+## Stream Link was changed on the headset.
+func link_mode_changed() -> void:
+	# Said when the choice can't take effect in this stream: it used to change
+	# on the button and nothing else, with no word why.
+	var note := FrameSecondLink.unavailable_note(is_streaming, stream_manager.through_meteor(),
+		stream_manager.meteor_offers_second_link(), not _second_link_address.is_empty(), settings.frame_link_mode)
+	if not note.is_empty():
+		comp.show_notice(note, 6.0)
+	if is_streaming and _second_link_address.is_empty():
+		refresh_second_link()
+	else:
+		apply_link_mode()
+
+## Tells the stream library, and through its pings Meteor, what Stream Link
+## says. Needs the PC's address on the second link (refresh_second_link).
+func apply_link_mode() -> void:
+	if stream_backend == null or _second_link_address.is_empty() or not is_streaming:
+		return
+	var mode := settings.frame_link_mode
+	var label: String = FrameSecondLink.MODE_LABELS[mode]
+	_link_carrier = ""
+	# Meteor 0.9.0-sf6: on "Adapter first" the library watches the adapter's
+	# link and asks for Wi-Fi's copies as well the moment it falters.
+	var watched := stream_manager.meteor_offers_link_hold()
+	stream_backend.set_second_link_watch(watched)
+	# Meteor 0.9.0-sf8: the controls go over both links too, in every choice
+	# but "Wi-Fi only", so the stream outlives either link going silent.
+	var controls := stream_manager.meteor_offers_control_both() and mode != FrameSecondLink.MODE_FIRST_ONLY
+	stream_backend.set_second_link_control(controls)
+	_link_holds_seen = 0
+	_link_alones_seen = 0
+	_link_hold_answer_wait = -1
+	if stream_manager.meteor_offers_link_sync():
+		# Meteor 0.9.0-sf5: the pings carry the choice and go on in every
+		# choice, so that Meteor always knows it (and stops at once for
+		# "Wi-Fi only", where an older Meteor took 5 seconds to notice).
+		stream_backend.set_second_link_choice(FrameSecondLink.wire_choice(mode), _link_rev_seen)
+		stream_backend.set_second_link(_second_link_address)
+		_log("[LINK] %s Stream Link: %s (told to Meteor over %s%s%s)" % [Time.get_time_string_from_system(), label, _second_link_names[1],
+			"; the headset watches the adapter's link" if watched and mode == FrameSecondLink.MODE_SECOND_ONLY else "",
+			"; controls over both links" if controls else ""])
+	elif mode == FrameSecondLink.MODE_FIRST_ONLY:
+		stream_backend.set_second_link("")
+		_log("[LINK] Stream Link: Wi-Fi only (no second link)")
+	else:
+		# "Adapter first" needs a Meteor that knows the request (sf4); an
+		# older one is asked for both links, which it does know.
+		var alone := mode == FrameSecondLink.MODE_SECOND_ONLY and stream_manager.meteor_offers_second_link_only()
+		stream_backend.set_second_link_choice((1 if alone else 0) if stream_manager.meteor_offers_second_link_only() else -1, -1)
+		stream_backend.set_second_link(_second_link_address)
+		_log("[LINK] Stream Link: %s (asked of Meteor over %s%s%s)" % [label, _second_link_names[1],
+			"" if alone or mode == FrameSecondLink.MODE_BOTH else "; this Meteor only knows both links, so both are used",
+			"; the original Meteor's multipath: picture and sound over both links, the rest on %s" % _second_link_names[0]
+				if stream_manager.meteor_speaks_plain_second_link() else ""])
+	_second_link_before = {}
+	_second_link_wait = FrameSecondLink.LOG_SECONDS
+	_link_carrier_counts = {}
+
+## Looks at the pick in Meteor's own menu and follows it if it is news.
+func _poll_link_pick() -> void:
+	if _link_poll_busy:
+		return
+	_link_poll_busy = true
+	var link: Dictionary = await stream_manager.meteor_link_pick()
+	_link_poll_busy = false
+	if not is_streaming or link.is_empty():
+		return
+	if link.has("depth") and stream_manager.meteor_offers_depth_live():
+		_follow_meteor_depth(bool(link["depth"]))
+	var rev := int(link["rev"])
+	var news := rev != _link_rev_seen
+	var follow := FrameSecondLink.follows_pick(rev, _link_rev_seen, settings.frame_link_untold)
+	_link_rev_seen = rev
+	var mode := FrameSecondLink.mode_of_wire(int(link["choice"]))
+	# A change made here that Meteor hadn't heard of has now had its turn:
+	# the pings carry the number just seen, which is what makes Meteor take
+	# this headset's choice as the choice.
+	var was_untold := settings.frame_link_untold
+	settings.frame_link_untold = false
+	if follow and mode != settings.frame_link_mode:
+		settings.frame_link_mode = mode
+		settings_controller._save_setting(_ui_second_link_btn, FrameSecondLink.MODE_LABELS[mode])
+		_log("[LINK] Stream Link: %s, picked in Meteor's menu on the PC" % FrameSecondLink.MODE_LABELS[mode])
+		comp.show_notice(Localization.t("Stream Link: %s (chosen on the PC)") % Localization.t(FrameSecondLink.MODE_LABELS[mode]), 4.0)
+	elif was_untold:
+		state_manager.save_state()
+	if news:
+		apply_link_mode()
+
+## Meteor has just said whether it offers depth at this moment. When that is
+## news (it differs from the last time, or at the first look from what the
+## stream started with), Meteor is asked for its offer again and the stream
+## takes it: Meteor's depth starts or stops without a reconnect. Asked only on
+## a change, because that question is one Meteor writes in its log.
+func _follow_meteor_depth(offered: bool) -> void:
+	var had := not stream_manager.meteor_depth_info().is_empty()
+	var news := FrameSecondLink.depth_offer_is_news(_meteor_depth_flag, offered, had)
+	_meteor_depth_flag = 1 if offered else 0
+	if not news or _meteor_depth_busy:
+		return
+	_meteor_depth_busy = true
+	var has: bool = await stream_manager.refresh_meteor_depth()
+	_meteor_depth_busy = false
+	if has == offered:
+		_meteor_depth_retries = 0
+	elif _meteor_depth_retries < 3:
+		_meteor_depth_retries += 1
+		_meteor_depth_flag = -1
+	if not is_streaming or has == had:
+		return
+	_log("[METEOR] %s Meteor's depth offer changed during the stream: %s" % [Time.get_time_string_from_system(),
+		"offered now" if has else "no longer offered (\"Host depth\" switched off in its menu on the PC)"])
+	if ui_controller:
+		ui_controller.update_3d_btn_state()
+	if depth_estimator != null and depth_estimator.enabled:
+		if not has:
+			comp.show_notice("Meteor's depth is off on the PC (its menu: Host depth). Using the headset's.", 6.0)
+		elif settings_controller.meteor_depth_selected():
+			comp.show_notice("Meteor's depth is back on. Using it.", 4.0)
+
+## "Adapter first", watched by the stream library: a log line each time it
+## asks Meteor for Wi-Fi's copies as well, with how quickly they came, and
+## each time it goes back to the adapter alone. These are the figures the 7u
+## log lacked (how long each part of a fallback takes).
+func _log_link_watch(counts: Dictionary) -> void:
+	var now := Time.get_time_string_from_system()
+	var holds := int(counts.get("holds", 0))
+	if holds > _link_holds_seen:
+		_log("[LINK] %s %s" % [now, FrameSecondLink.describe_hold(counts, holds - _link_holds_seen)])
+		# And how the adapter's link looked to the headset at that moment.
+		var adapter := _network_watch.adapter_line()
+		if not adapter.is_empty():
+			_log("[NET] %s %s" % [now, adapter])
+		_link_hold_answer_wait = -1 if int(counts.get("hold_answered_ms", 0)) > 0 else 0
+	elif _link_hold_answer_wait >= 0:
+		var answered := int(counts.get("hold_answered_ms", 0))
+		_link_hold_answer_wait += 1
+		if answered > 0:
+			_log("[LINK] %s Wi-Fi's first packet came %d ms after it was asked for" % [now, answered])
+			_link_hold_answer_wait = -1
+		elif _link_hold_answer_wait >= 10:
+			_log("[LINK] %s 10 seconds on, nothing has come over Wi-Fi either" % now)
+			_link_hold_answer_wait = -1
+	_link_holds_seen = holds
+	var alones := int(counts.get("alones", 0))
+	if alones > _link_alones_seen:
+		_log("[LINK] %s the adapter's link has been steady for 3 seconds: it carries the stream alone" % now)
+	_link_alones_seen = alones
+
+## Once a second while a stream runs: the log line, the look at Meteor's menu,
+## and for "Adapter first" a notice when the stream changes link.
+func _second_link_tick() -> void:
+	if stream_manager.meteor_offers_link_sync():
+		_link_poll_wait -= 1.0
+		if _link_poll_wait <= 0.0:
+			_link_poll_wait = LINK_POLL_SECONDS
+			_poll_link_pick()
+	if _second_link_address.is_empty():
+		_second_link_retry_wait -= 1.0
+		if _second_link_retry_wait <= 0.0:
+			_second_link_retry_wait = SECOND_LINK_RETRY_SECONDS
+			_find_second_link()
+		return
+	var counts: Dictionary = stream_backend.second_link_stats()
+	_log_link_watch(counts)
+	if settings.frame_link_mode == FrameSecondLink.MODE_SECOND_ONLY and not _link_carrier_counts.is_empty():
+		var now_on := FrameSecondLink.carrier(
+			int(counts.get("first_link", 0)) - int(_link_carrier_counts.get("first_link", 0)),
+			int(counts.get("second_link", 0)) - int(_link_carrier_counts.get("second_link", 0)), _link_carrier)
+		if now_on != _link_carrier:
+			if not _link_carrier.is_empty():
+				_log("[LINK] %s the stream is on %s" % [Time.get_time_string_from_system(),
+					"the adapter again" if now_on == "adapter" else "Wi-Fi: the adapter's signal was lost"])
+				comp.show_notice("Back on the adapter." if now_on == "adapter" else "Adapter signal lost: streaming over Wi-Fi.", 4.0)
+			_link_carrier = now_on
+	_link_carrier_counts = counts
+	if settings.frame_link_mode == FrameSecondLink.MODE_FIRST_ONLY:
+		return
+	_second_link_wait -= 1.0
+	if _second_link_wait <= 0.0:
+		_second_link_wait = FrameSecondLink.LOG_SECONDS
+		_log("[LINK] %s %s" % [Time.get_time_string_from_system(),
+			FrameSecondLink.describe(counts, _second_link_before, _second_link_names[0], _second_link_names[1])])
+		_second_link_before = counts
+
+# Steam Frame: the battery's charge and the power being drawn, in the log,
+# this often while a stream runs (see FramePowerWatch for why).
+const POWER_LOG_SECONDS := 60
+var _power_wait := POWER_LOG_SECONDS
+var _power_watch := FramePowerWatch.new()
+
+# Steam Frame: the headset's own network link, in the log. A line a minute
+# while a stream runs, one every few seconds after a stream is lost (see
+# FrameNetworkWatch for why and for what is deliberately left out).
+var _network_watch := FrameNetworkWatch.new()
+
+func _log_network(lines: PackedStringArray) -> void:
+	for line in lines:
+		_log("[NET] %s %s" % [Time.get_time_string_from_system(), line])
+
+# Steam Frame: what SteamVR has set for this app (refresh rate, motion
+# smoothing, resolution). The installer switches motion smoothing off; this
+# shows in the log whether that took. Read-only.
+func _log_steamvr_app_settings() -> void:
+	var app_id := OS.get_environment("SteamAppId")
+	var path := OS.get_environment("HOME").path_join(".config/openvr/config/steamvr.vrsettings")
+	if app_id == "" or not FileAccess.file_exists(path):
+		_log("[STEAMVR] per-app settings: not found (app id '%s')" % app_id)
+		return
+	var parsed = JSON.parse_string(FileAccess.get_file_as_string(path))
+	var block = parsed.get("steam.app." + app_id) if parsed is Dictionary else null
+	_log("[STEAMVR] per-app settings for %s: %s" % [app_id, JSON.stringify(block) if block is Dictionary else "none set"])
+
+# Steam Frame diagnostic, temporary (5k). The 5j log had the app at half rate
+# (36 fps) with a curved screen and PT Fade, but at 60 to 70 for stretches
+# while the menu was being used, with nothing about the screen or the fade
+# changed. This writes, once a second beside [STATS], where a frame's time
+# goes and what the app was drawing and pointing at, to find the real cause.
+var _cost_frames := 0
+var _cost_gpu_sum := 0.0
+var _cost_gpu_max := 0.0
+var _cost_cpu_sum := 0.0
+var _cost_measuring := false
+var _cost_lines := 0
+var _cost_longest := 0.0
+var _cost_system: FrameSystemStats = null
+var _cost_pictures: Array[SubViewport] = []
+var _cost_pictures_gpu_sum := 0.0
+
+func _sample_frame_cost() -> void:
+	var view: RID = get_viewport().get_viewport_rid()
+	if not _cost_measuring:
+		RenderingServer.viewport_set_measure_render_time(view, true)
+		_cost_measuring = true
+		return
+	var gpu: float = RenderingServer.viewport_get_measured_render_time_gpu(view)
+	_cost_frames += 1
+	_cost_gpu_sum += gpu
+	_cost_gpu_max = maxf(_cost_gpu_max, gpu)
+	_cost_cpu_sum += RenderingServer.viewport_get_measured_render_time_cpu(view) + RenderingServer.get_frame_setup_time_cpu()
+	_cost_longest = maxf(_cost_longest, get_process_delta_time() * 1000.0)
+	# The pictures drawn beside the 3D scene every frame (the flat screen's
+	# layer, one per eye with 3D; menus; pointers) have a cost of their own.
+	for sub in _cost_pictures:
+		if is_instance_valid(sub):
+			_cost_pictures_gpu_sum += RenderingServer.viewport_get_measured_render_time_gpu(sub.get_viewport_rid())
+
+func _log_frame_cost() -> void:
+	if _cost_frames == 0:
+		return
+	var off_ahead := -1.0
+	var distance := -1.0
+	if xr_camera and primary_screen:
+		var to_screen: Vector3 = primary_screen.global_position - xr_camera.global_position
+		distance = to_screen.length()
+		if distance > 0.01:
+			off_ahead = rad_to_deg((-xr_camera.global_transform.basis.z).angle_to(to_screen))
+	var in_scene: bool = settings_controller._screen_drawn_in_scene()
+	var width := primary_screen.mesh_size.x if primary_screen else 0.0
+	if _cost_system == null:
+		_cost_system = FrameSystemStats.new()
+		_log("[FRAME-COST] system readings: %s" % _cost_system.setup())
+	var system := _cost_system.sample()
+	_log("[FRAME-COST] gpu %.1f ms (worst %.1f), %d draws | screen %s, %.1f m wide, %.1f m away, %.0f deg from straight ahead | filter %s, sharpen %d | menu %s, keyboard %s | %s, cpu %.1f ms, longest frame %.1f ms, foveation %s, other pictures gpu %.1f ms%s" % [
+		_cost_gpu_sum / _cost_frames, _cost_gpu_max,
+		int(Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME)),
+		"in scene" if in_scene else "layer", width, distance, off_ahead,
+		("fast" if settings.frame_fast_filter else "full") if in_scene else "-", settings.sharpen_mode,
+		"open" if ui_visible else "closed",
+		"open" if virtual_keyboard and virtual_keyboard.visible else "closed",
+		Time.get_time_string_from_system(), _cost_cpu_sum / _cost_frames, _cost_longest,
+		SettingsController.FOVEATION_LABELS[settings_controller.foveation_active].to_lower(),
+		_cost_pictures_gpu_sum / _cost_frames,
+		(" | " + system) if system != "" else ""])
+	_cost_pictures_gpu_sum = 0.0
+	_cost_frames = 0
+	_cost_gpu_sum = 0.0
+	_cost_gpu_max = 0.0
+	_cost_cpu_sum = 0.0
+	_cost_longest = 0.0
+	# Which off-screen pictures are redrawn every frame: timed from now on,
+	# and listed in the log every ten seconds.
+	_cost_lines += 1
+	var drawing: Array[String] = []
+	_cost_pictures.clear()
+	for node in get_tree().root.find_children("*", "SubViewport", true, false):
+		var sub: SubViewport = node
+		if sub.render_target_update_mode == SubViewport.UPDATE_ALWAYS \
+				or sub.render_target_update_mode == SubViewport.UPDATE_WHEN_VISIBLE:
+			drawing.append("%s %dx%d" % [sub.name, sub.size.x, sub.size.y])
+			RenderingServer.viewport_set_measure_render_time(sub.get_viewport_rid(), true)
+			_cost_pictures.append(sub)
+	if _cost_lines % 10 == 1:
+		_log("[FRAME-COST] redrawn every frame: %s" % (", ".join(drawing) if not drawing.is_empty() else "nothing"))
 
 func toggle_performance_overlay():
 	settings.performance_overlay_enabled = not settings.performance_overlay_enabled
@@ -2929,6 +3836,13 @@ func _process_idle_timeout():
 		# the welcome/composition state.
 
 func _notification(what):
+	# Steam Frame: log keyboard focus. The headset's volume buttons never reach
+	# Nightfall (no [VOLKEY] lines) and SteamOS then keeps turning the volume;
+	# Moonlight XR found Game Mode needs the app's window to hold focus.
+	if what == NOTIFICATION_APPLICATION_FOCUS_IN or what == NOTIFICATION_WM_WINDOW_FOCUS_IN:
+		_log("[FOCUS] window got focus (%s)" % ("app" if what == NOTIFICATION_APPLICATION_FOCUS_IN else "window"))
+	elif what == NOTIFICATION_APPLICATION_FOCUS_OUT or what == NOTIFICATION_WM_WINDOW_FOCUS_OUT:
+		_log("[FOCUS] window lost focus (%s)" % ("app" if what == NOTIFICATION_APPLICATION_FOCUS_OUT else "window"))
 	if what == NOTIFICATION_WM_CLOSE_REQUEST:
 		if welcome_screen: welcome_screen.cancel_xr_control()
 		if browser_prototype:
@@ -3065,13 +3979,270 @@ func _set_ui_position():
 	if _ui_has_saved_offset:
 		_anchor_to_primary(ui_panel_3d, _ui_saved_offset, _ui_saved_rot_y, _ui_saved_rot_x)
 	else:
+		_place_ui_default()
+
+func _place_ui_default():
+	var cam_pos = xr_camera.global_position
+	if device_is_steam_frame and apply_spot(ui_panel_3d, settings.menu_spot):
+		_save_ui_offset()
+		return
+	if device_is_steam_frame:
+		apply_spot(ui_panel_3d, FRAME_MENU_SPOT)
+	else:
 		var offset = Vector3(-1.0, -0.5, 0.8)
 		ui_panel_3d.global_position = primary_screen.global_position + primary_screen.global_transform.basis * offset
-		var cam_pos = xr_camera.global_position
 		var to_cam = (cam_pos - ui_panel_3d.global_position).normalized()
 		ui_panel_3d.rotation.y = atan2(to_cam.x, to_cam.z)
 		ui_panel_3d.rotation.x = -0.15
+	_save_ui_offset()
+
+# --- Saved default spots (Steam Frame) ---------------------------------------
+# Spots are stored relative to you and the screen: a frame at your head,
+# looking at the screen, with the screen's "up". So they come back in the same
+# place around the screen - also lying down with the screen on the ceiling.
+func _viewer_frame() -> Transform3D:
+	var cam_pos: Vector3 = xr_camera.global_position
+	var fwd: Vector3 = primary_screen.global_position - cam_pos
+	fwd = fwd.normalized() if fwd.length() > 0.01 else Vector3.FORWARD
+	var up: Vector3 = primary_screen.global_transform.basis.y.normalized()
+	up -= fwd * up.dot(fwd)
+	if up.length() < 0.01:
+		up = Vector3.UP - fwd * fwd.dot(Vector3.UP)
+	if up.length() < 0.01:
+		up = Vector3.BACK
+	return Transform3D(Basis.looking_at(fwd, up.normalized()), cam_pos)
+
+## Steam Frame: where the menu and the keyboard start when nothing has been
+## saved (and where "Original Default" puts them back): x, y, z in metres
+## from the viewer and yaw, pitch in radians, as spot_from_node() gives them.
+## These are the spots settled on after weeks of daily use (the keyboard a
+## little further away, the menu likewise), read from the 8d log and rounded. The menu is off to
+## the left, turned toward you; the keyboard 0.86 m ahead and lower. Before:
+## menu 0.3 m left and 0.8 m ahead, keyboard 0.55 m ahead.
+const FRAME_MENU_SPOT := [-0.87, -0.45, -0.80, 0.86, -0.36]
+const FRAME_KEYBOARD_SPOT := [0.11, -0.57, -0.86, -0.02, -0.44]
+
+func spot_from_node(n: Node3D) -> Array:
+	var local: Transform3D = _viewer_frame().affine_inverse() * n.global_transform.orthonormalized()
+	var e: Vector3 = local.basis.get_euler()
+	return [local.origin.x, local.origin.y, local.origin.z, e.y, e.x]
+
+func apply_spot(n: Node3D, spot: Array) -> bool:
+	if spot.size() != 5:
+		return false
+	var local := Transform3D(Basis.from_euler(Vector3(float(spot[4]), float(spot[3]), 0.0)),
+		Vector3(float(spot[0]), float(spot[1]), float(spot[2])))
+	n.global_transform = _viewer_frame() * local
+	return true
+
+func reset_ui_position():
+	_place_ui_default()
+
+# --- Recenter and Head Lock (Steam Frame) -------------------------------------
+var _head_lock_offset := Transform3D()
+var _head_lock_valid := false
+var _head_lock_tilt := false
+var _prev_click_trigger := {"left": 0.0, "right": 0.0}
+var _was_grabbing := false
+
+# Where you're looking: a frame at your eyes pointing along your gaze, kept
+# level (no head tilt) so nothing ends up crooked.
+func _gaze_frame(tilt: bool = false) -> Transform3D:
+	var cam: Transform3D = xr_camera.global_transform
+	if tilt:
+		return Transform3D(cam.basis.orthonormalized(), cam.origin)
+	var fwd: Vector3 = -cam.basis.z
+	var flat := Vector3(fwd.x, 0.0, fwd.z)
+	if flat.length() < 0.05:
+		flat = Vector3(-cam.basis.z.x - cam.basis.y.x, 0.0, -cam.basis.z.z - cam.basis.y.z)
+	flat = flat.normalized() if flat.length() > 0.001 else Vector3.FORWARD
+	var pitch := clampf(asin(clampf(fwd.y, -1.0, 1.0)), deg_to_rad(-40.0), deg_to_rad(40.0))
+	var dir := (flat * cos(pitch) + Vector3.UP * sin(pitch)).normalized()
+	return Transform3D(Basis.looking_at(dir, Vector3.UP), cam.origin)
+
+# Straight ahead of where you're looking (all the way up or down too, e.g.
+# the ceiling when lying down), facing you. Upright by the room when you're
+# looking roughly level; by your head when looking far up or down.
+func _transform_in_view(dist: float) -> Transform3D:
+	var cam: Transform3D = xr_camera.global_transform
+	var dir: Vector3 = (-cam.basis.z).normalized()
+	var pos: Vector3 = cam.origin + dir * dist
+	var z: Vector3 = -dir
+	var a := clampf((0.85 - absf(dir.y)) / 0.35, 0.0, 1.0)
+	var head_up: Vector3 = cam.basis.y.normalized()
+	var up: Vector3 = Vector3.UP * a + head_up * (1.0 - a)
+	up -= z * up.dot(z)
+	if up.length() < 0.001:
+		up = head_up - z * head_up.dot(z)
+	up = up.normalized()
+	var x := up.cross(z).normalized()
+	return Transform3D(Basis(x, z.cross(x), z), pos)
+
+# Moves the main screen, and everything arranged around it, in one piece.
+func _move_screen_group(new_primary: Transform3D) -> void:
+	var delta_t: Transform3D = new_primary * primary_screen.global_transform.affine_inverse()
+	for s in screens:
+		s.global_transform = delta_t * s.global_transform
+	if ui_panel_3d:
+		ui_panel_3d.global_transform = delta_t * ui_panel_3d.global_transform
+	if virtual_keyboard:
+		virtual_keyboard.global_transform = delta_t * virtual_keyboard.global_transform
+	if comp:
+		comp.update_cylinder_params()
+
+# A saved or dragged size past VRScreen's limit is brought back inside it, so
+# a screen can't stay too large to reach its own corners and grab bar.
+func cap_screen_sizes() -> void:
+	if not xr_camera:
+		return
+	var changed := false
+	for s in screens:
+		if s.mesh_size.y <= 0.0:
+			continue
+		var distance: float = s.global_position.distance_to(xr_camera.global_position)
+		var limit: float = VRScreen.max_width_at(distance)
+		if s.mesh_size.x > limit:
+			_log("[SCREEN] %.1f m wide at %.1f m away is past the limit; set to %.1f m" % [s.mesh_size.x, distance, limit])
+			s.set_width(limit, s.mesh_size.x / s.mesh_size.y)
+			changed = true
+	if changed and comp and comp.available:
+		comp.update_layer_size()
+
+# Start Distance was changed (Steam Frame): shows the new distance by moving
+# the screens to it along your line to the main screen. The menu and keyboard
+# stay put, so the slider being dragged doesn't move away under the pointer.
+func move_screens_to_distance(dist: float) -> void:
+	if not is_xr_active or not primary_screen or not xr_camera:
+		return
+	var head: Vector3 = xr_camera.global_position
+	var to_screen: Vector3 = primary_screen.global_position - head
+	if to_screen.length() < 0.05:
+		return
+	var shift: Vector3 = head + to_screen.normalized() * dist - primary_screen.global_position
+	for s in screens:
+		s.global_position += shift
+		s.apply_curvature()  # a curved screen's radius depends on its distance
+	if comp:
+		comp.update_cylinder_params()
+	cap_screen_sizes()  # nearer, the widest allowed is smaller
+	if _ui_screen_size_btn:
+		settings_controller.refresh_screen_size_btn()
+	# The menu and keyboard remember their places relative to the screen;
+	# note the new ones, or they would jump after it the next time they open.
+	if ui_panel_3d and ui_panel_3d.visible:
 		_save_ui_offset()
+	if virtual_keyboard and virtual_keyboard.visible:
+		virtual_keyboard._save_offset()
+	_head_lock_valid = false
+	_log("[VIEW] screen moved to its start distance, %.2f m" % dist)
+
+# Recenter: brings the screen in front of where you're looking now, at the
+# same distance, with the menu and keyboard keeping their places around it.
+func recenter_view() -> void:
+	if not primary_screen or not xr_camera:
+		return
+	var dist: float = clampf((primary_screen.global_position - xr_camera.global_position).length(), 0.5, 6.0)
+	var t := _transform_in_view(dist)
+	_move_screen_group(Transform3D(t.basis * Basis.from_scale(primary_screen.global_transform.basis.get_scale()), t.origin))
+	# The menu and keyboard go to their default spots (your saved ones, or
+	# Nightfall's own), which are set relative to you and the screen.
+	if ui_panel_3d:
+		if ui_panel_3d.visible:
+			reset_ui_position()
+		else:
+			_ui_has_saved_offset = false
+	if virtual_keyboard:
+		if virtual_keyboard.visible:
+			virtual_keyboard.reset_to_default()
+		else:
+			virtual_keyboard._has_saved_offset = false
+	_head_lock_valid = false
+	state_manager.save_state()
+	_log("[VIEW] recentered at %.2f m" % dist)
+
+func capture_head_lock() -> void:
+	_head_lock_tilt = settings.head_lock == 2
+	_head_lock_offset = _gaze_frame(_head_lock_tilt).affine_inverse() * primary_screen.global_transform
+	_head_lock_valid = true
+
+# Head Lock: the screen keeps the same place in your view, following smoothly.
+func _process_head_lock(delta: float) -> void:
+	if not settings.head_lock or not primary_screen:
+		return
+	if grabbed_node != null:
+		_head_lock_valid = false # you're moving something; pick up the new spot after
+		return
+	if not _head_lock_valid or _head_lock_tilt != (settings.head_lock == 2):
+		capture_head_lock()
+		return
+	var target: Transform3D = _gaze_frame(_head_lock_tilt) * _head_lock_offset
+	var cur: Transform3D = primary_screen.global_transform
+	if cur.origin.distance_to(target.origin) < 0.002 and cur.basis.z.dot(target.basis.z) > 0.99999 * cur.basis.z.length() * target.basis.z.length():
+		return
+	var k := 1.0 - exp(-delta * 6.0)
+	_move_screen_group(cur.interpolate_with(target, k))
+
+# Vibration: a light tick when you click on something with the trigger.
+func buzz(hand: String, strength: float, seconds: float) -> void:
+	if settings.haptics <= 0:
+		return
+	var node: XRController3D = left_hand if hand == "left" else right_hand
+	if node:
+		node.trigger_haptic_pulse("haptic", 0.0, strength, seconds, 0.0)
+
+# Faint tick as the pointer moves onto a button or key (Vibration: Clicks + Hover).
+func hover_buzz(hand: String) -> void:
+	if settings.haptics >= 2:
+		buzz(hand, 0.05, 0.008)
+
+# Puts the menu or keyboard right where you're looking, facing you.
+func bring_to_view(n: Node3D, dist: float) -> void:
+	var g := _gaze_frame()
+	var dir: Vector3 = -g.basis.z
+	n.global_position = g.origin + dir * dist
+	var yaw := atan2(g.origin.x - n.global_position.x, g.origin.z - n.global_position.z)
+	n.rotation = Vector3(asin(clampf(dir.y, -1.0, 1.0)), yaw, 0.0)
+	if n == ui_panel_3d:
+		_save_ui_offset()
+	elif n == virtual_keyboard:
+		virtual_keyboard._save_offset()
+	_log("[VIEW] %s brought in front of you" % ("menu" if n == ui_panel_3d else "keyboard"))
+
+func show_menu_in_view() -> void:
+	if not ui_visible:
+		_toggle_ui()
+	bring_to_view(ui_panel_3d, 0.8)
+
+func show_keyboard_in_view() -> void:
+	if not virtual_keyboard:
+		return
+	if not virtual_keyboard.visible:
+		virtual_keyboard.toggle()
+	bring_to_view(virtual_keyboard, 0.6)
+
+func _process_click_haptics() -> void:
+	for hand in ["left", "right"]:
+		var node: XRController3D = left_hand if hand == "left" else right_hand
+		var v: float = node.get_float("trigger") if node else 0.0
+		if v > 0.5 and _prev_click_trigger[hand] <= 0.5:
+			var ray: RayCast3D = left_hand_raycast if hand == "left" else hand_raycast
+			if ray and ray.is_colliding():
+				buzz(hand, 0.4, 0.03)
+		_prev_click_trigger[hand] = v
+	var grabbing := grabbed_node != null
+	if grabbing and not _was_grabbing:
+		buzz(xr_interaction._active_hand, 0.6, 0.05)
+	_was_grabbing = grabbing
+
+# Windows key chords such as Win+H (dictation).
+func send_win_chord(key: int) -> void:
+	if not is_streaming:
+		comp.show_notice("Connect to your PC first.", 2.0)
+		return
+	stream_backend.send_keyboard_event(KEY_META, 3, 0)
+	stream_backend.send_keyboard_event(key, 3, 0x08)
+	stream_backend.send_keyboard_event(key, 4, 0x08)
+	stream_backend.send_keyboard_event(KEY_META, 4, 0)
 
 func _save_ui_offset():
 	var scr_basis = primary_screen.global_transform.basis.inverse()
@@ -3092,13 +4263,7 @@ func _set_ui_visible(vis: bool):
 		if _ui_has_saved_offset:
 			_anchor_to_primary(ui_panel_3d, _ui_saved_offset, _ui_saved_rot_y, _ui_saved_rot_x)
 		else:
-			var offset = Vector3(-1.0, -0.5, 0.8)
-			ui_panel_3d.global_position = primary_screen.global_position + primary_screen.global_transform.basis * offset
-			var cam_pos = xr_camera.global_position
-			var to_cam = (cam_pos - ui_panel_3d.global_position).normalized()
-			ui_panel_3d.rotation.y = atan2(to_cam.x, to_cam.z)
-			ui_panel_3d.rotation.x = -0.15
-			_save_ui_offset()
+			_place_ui_default()
 	elif is_xr_active:
 		_save_ui_offset()
 
@@ -3110,6 +4275,8 @@ func _set_viewport_active(viewport: SubViewport, active: bool):
 		viewport.render_target_update_mode = wanted
 
 func _sync_interaction_viewports():
+	if comp == null:
+		return # comp is created after the first frames (native Steam Frame startup)
 	# These two cursors are only needed for the separately composited menu and
 	# keyboard. Screen pointing uses the cursor embedded in the eye viewports.
 	var panel_visible = ui_visible or (virtual_keyboard and virtual_keyboard.visible)
@@ -3152,10 +4319,17 @@ func _reposition_screen_and_ui(use_cam_yaw: bool = true):
 	# The primary, not screen_mesh: the original node is retired when its
 	# monitor is switched off, and a new screen takes the primary's place.
 	var main_screen: VRScreen = primary_screen if primary_screen else screen_mesh
-	main_screen.global_position = cam_pos + cam_fwd * 2.16
+	var start_distance: float = settings.screen_start_distance if device_is_steam_frame else 2.16
+	main_screen.global_position = cam_pos + cam_fwd * start_distance
 	main_screen.rotation = Vector3.ZERO
 	if use_cam_yaw:
 		main_screen.rotation.y = atan2(-cam_fwd.x, -cam_fwd.z)
+	if frame_first_start and main_screen.mesh_size.y > 0.0:
+		frame_first_start = false
+		main_screen.set_width(FrameDefaults.SCREEN_WIDTH, main_screen.mesh_size.x / main_screen.mesh_size.y)
+		if comp and comp.available:
+			comp.update_layer_size()
+		_log("[SCREEN] first start: %.1f m wide at %.1f m" % [main_screen.mesh_size.x, start_distance])
 	main_screen.apply_curvature()
 	# get_cylinder_radius() is camera-position-derived, so any screen curved before
 	# this point (e.g. _init_post_xr()'s early best-effort pass, which isn't gated on
@@ -3200,7 +4374,49 @@ func _load_controller_models():
 		right_model.rotation = Vector3(0, PI, 0)
 		_apply_controller_textures(right_model, false)
 
+# Steam Frame: SteamVR offers XR_EXT_render_model, so the runtime can hand us
+# its own models of the controllers. Godot's OpenXRRenderModelManager places
+# them itself; Settings > Controller Models turns them off.
+func _setup_frame_controller_models() -> void:
+	if not ClassDB.class_exists("OpenXRRenderModelManager"):
+		_log("[MODELS] OpenXRRenderModelManager not available in this Godot build")
+		return
+	# One manager per hand, so each controller's model can be hidden on its
+	# own while that controller isn't tracked (ControllerTrackingGuard).
+	frame_controller_models = Node3D.new()
+	frame_controller_models.name = "FrameControllerModels"
+	xr_origin.add_child(frame_controller_models)
+	for side in ["left", "right"]:
+		var mgr = ClassDB.instantiate("OpenXRRenderModelManager")
+		mgr.name = "Models_" + side
+		mgr.set("tracker", 2 if side == "left" else 3) # RENDER_MODEL_TRACKER_LEFT/RIGHT_HAND
+		frame_controller_models.add_child(mgr)
+		_frame_model_managers[side] = mgr
+		if mgr.has_signal("render_model_added"):
+			mgr.connect("render_model_added", func(m): _log("[MODELS] %s controller model added: %s" % [side, str(m)]))
+	if not tracking_guard:
+		tracking_guard = ControllerTrackingGuard.new()
+		tracking_guard.setup(self)
+		add_child(tracking_guard)
+	update_frame_controller_models()
+	_log("[MODELS] Frame controller models set up (shown=%s)" % settings.show_controller_models)
+
+var _frame_model_managers: Dictionary = {}
+var tracking_guard: ControllerTrackingGuard = null
+var voice_typing: VoiceTyping = null
+
+func update_frame_controller_models() -> void:
+	if frame_controller_models:
+		frame_controller_models.visible = settings.show_controller_models and not _is_using_hands
+	for side in _frame_model_managers:
+		_frame_model_managers[side].visible = not (tracking_guard and tracking_guard.hide_model(side))
+
+func on_controller_tracking_changed(side: String, lost: bool) -> void:
+	update_frame_controller_models()
+	_apply_hand_rest(side, lost or (xr_interaction != null and (xr_interaction._right_inactive_time if side == "right" else xr_interaction._left_inactive_time) >= HAND_REST_THRESHOLD))
+
 func _set_controller_models_visible(visible_state: bool):
+	update_frame_controller_models()
 	_set_hand_local_model_visible(right_hand, visible_state)
 	_set_hand_local_model_visible(left_hand, visible_state)
 
@@ -3398,6 +4614,8 @@ func _create_data():
 	bg_manager._create_data()
 
 func _update_hand_indicator_layers():
+	if comp == null:
+		return # comp is created after the first frames (native Steam Frame startup)
 	composition_hand_indicators.update(
 		DEBUG_COMP_HANDS and comp.in_use and is_xr_active and _is_using_hands,
 		xr_camera.global_position)

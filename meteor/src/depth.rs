@@ -705,6 +705,8 @@ impl Depth {
             match depth.download.run_vulkan(&depth.models_dir,id) {
                 Ok(())=> {
                     log::info!("Vulkan VDA installed: {id}; select it under GPU / model");
+                    #[cfg(windows)]
+                    crate::tray_windows::queue_balloon(format!("{} is installed. Choose it under GPU / model; your current model is unchanged.", model_label(id)));
                     #[cfg(target_os="linux")]
                     if let Ok(runtime)=tokio::runtime::Builder::new_current_thread().enable_all().build() {
                         runtime.block_on(crate::desktop::notify("Vulkan VDA ready", "Select the downloaded model under your GPU in Meteor's GPU / model menu. Your current model is unchanged."));

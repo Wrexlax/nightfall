@@ -8,7 +8,7 @@ if(NOT DEFINED CMAKE_TOOLCHAIN_FILE)
     endif()
 endif()
 
-project(${LIBNAME} LANGUAGES CXX)
+project(${LIBNAME} LANGUAGES C CXX)
 include(CTest)
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
@@ -149,12 +149,26 @@ endif()
 add_library(${LIBNAME} SHARED)
 
 file(GLOB_RECURSE SOURCE_FILES CONFIGURE_DEPENDS "src/*.cpp" "src/*.h")
+# The Steam Frame's own depth engine; added back below when its runtime is there.
+list(FILTER SOURCE_FILES EXCLUDE REGEX "/src/video/frame_depth_(engine|test_main)\\.cpp$")
 if(ANDROID)
     # These are Linux-only native TFLite sources. Android uses DepthEstimator.java
     # through the JNI bridge and does not ship TensorFlow Lite C++ headers.
     list(REMOVE_ITEM SOURCE_FILES
         "${CMAKE_CURRENT_SOURCE_DIR}/src/video/midas_depth_engine.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/video/midas_test_main.cpp")
+elseif(TARGET_PLATFORM STREQUAL "steamos")
+    # Steam Frame: not the desktop engine (TensorFlow Lite's C++ interface and
+    # ncnn; NIGHTFALL_NO_TFLITE in midas_depth_engine.h) but its own, further
+    # down. No PyroWave either.
+    list(REMOVE_ITEM SOURCE_FILES
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/video/midas_depth_engine.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/video/midas_test_main.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/video/pyrowave_decoder.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/video/pyrowave_gpu_pipeline.cpp")
+    # Iris V4L2 stateful decoder (from Moonlight XR Native, GPLv3) - FFmpeg's
+    # v4l2m2m allocates CAPTURE before SOURCE_CHANGE and stalls on this driver.
+    list(APPEND SOURCE_FILES "${CMAKE_CURRENT_SOURCE_DIR}/src/video/frame/v4l2_decoder.c")
 else()
     # PyroWave decoding is Quest-only (docs/plans/active/pyrowave-codec.md):
     # it needs the NDK's Vulkan headers and the vendored Android library, and
@@ -162,6 +176,28 @@ else()
     list(REMOVE_ITEM SOURCE_FILES
         "${CMAKE_CURRENT_SOURCE_DIR}/src/video/pyrowave_decoder.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/video/pyrowave_gpu_pipeline.cpp")
+endif()
+# Voice typing (Steam Frame only): whisper.cpp, vendored from the official
+# v1.9.5 release (third_party/whisper.cpp/VENDORED_VERSION) and built here from
+# source, CPU backend only for now. Elsewhere the voice sources are left out.
+if(TARGET_PLATFORM STREQUAL "steamos")
+    # Static: one .so to ship. (whisper.cpp's own option would default to ON.)
+    set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+    set(WHISPER_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(WHISPER_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(WHISPER_BUILD_SERVER OFF CACHE BOOL "" FORCE)
+    set(WHISPER_CURL OFF CACHE BOOL "" FORCE)
+    set(WHISPER_SDL2 OFF CACHE BOOL "" FORCE)
+    set(WHISPER_ALL_WARNINGS OFF CACHE BOOL "" FORCE)
+    set(GGML_NATIVE OFF CACHE BOOL "" FORCE)
+    set(GGML_OPENMP OFF CACHE BOOL "" FORCE)
+    set(GGML_BACKEND_DL OFF CACHE BOOL "" FORCE)
+    set(GGML_CCACHE OFF CACHE BOOL "" FORCE)
+    # Steam Frame CPU (Snapdragon): dot-product and half-float instructions.
+    set(GGML_CPU_ARM_ARCH "armv8.2-a+dotprod+fp16" CACHE STRING "" FORCE)
+    add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/third_party/whisper.cpp" "${CMAKE_CURRENT_BINARY_DIR}/whisper-build" EXCLUDE_FROM_ALL)
+else()
+    list(FILTER SOURCE_FILES EXCLUDE REGEX "/src/voice/")
 endif()
 target_sources(${LIBNAME} PRIVATE ${SOURCE_FILES})
 
@@ -181,6 +217,51 @@ target_compile_definitions(${LIBNAME} PRIVATE
     $<$<CONFIG:Debug>:NIGHTFALL_DEBUG>
 )
 
+if(TARGET_PLATFORM STREQUAL "steamos")
+    # NIGHTFALL_SECOND_LINK: the Steam Frame's moonlight-common-c carries
+    # steam-frame/toolchain/overlay-ports/moonlight-common-c/0004-second-link.patch
+    # (LiSetSecondLink, LiGetSecondLinkStats); upstream's doesn't.
+    target_compile_definitions(${LIBNAME} PRIVATE NIGHTFALL_NO_TFLITE NIGHTFALL_HAS_WHISPER NIGHTFALL_SECOND_LINK)
+    target_link_libraries(${LIBNAME} PRIVATE whisper)
+    # On-headset depth (src/video/frame_depth_engine.h): LiteRT with XNNPACK,
+    # built once, outside this tree, by steam-frame/build-litert.sh into one
+    # static archive. Without it the library builds as before, with Meteor as
+    # the only depth source.
+    set(FRAME_LITERT_DIR "$ENV{FRAME_NATIVE}/litert/dist-arm64" CACHE PATH "LiteRT C API from steam-frame/build-litert.sh")
+    if(EXISTS "${FRAME_LITERT_DIR}/lib/libnightfall_litert.a")
+        message(STATUS "On-headset depth: LiteRT from ${FRAME_LITERT_DIR}")
+        target_sources(${LIBNAME} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/video/frame_depth_engine.cpp")
+        target_include_directories(${LIBNAME} PRIVATE "${FRAME_LITERT_DIR}/include")
+        target_link_libraries(${LIBNAME} PRIVATE "${FRAME_LITERT_DIR}/lib/libnightfall_litert.a")
+        target_compile_definitions(${LIBNAME} PRIVATE NIGHTFALL_FRAME_DEPTH)
+        # The engine's checks as a program of their own (run it on a PC build:
+        # steam-frame/README.md, "On-headset depth"). Opt-in.
+        if(NIGHTFALL_BUILD_FRAME_DEPTH_TEST)
+            add_executable(frame_depth_test src/video/frame_depth_test_main.cpp src/video/frame_depth_engine.cpp)
+            target_compile_features(frame_depth_test PRIVATE cxx_std_17)
+            target_include_directories(frame_depth_test PRIVATE src "${FRAME_LITERT_DIR}/include")
+            target_link_libraries(frame_depth_test PRIVATE "${FRAME_LITERT_DIR}/lib/libnightfall_litert.a" pthread dl m)
+        endif()
+        # The same engine on the graphics chip (a test: frame_depth_engine.h):
+        # ncnn with its Vulkan backend, built once by steam-frame/build-ncnn.sh.
+        # Without it the processor models are all there is.
+        set(FRAME_NCNN_DIR "$ENV{FRAME_NATIVE}/ncnn/dist-arm64" CACHE PATH "ncnn with Vulkan from steam-frame/build-ncnn.sh")
+        if(EXISTS "${FRAME_NCNN_DIR}/lib/cmake/ncnn/ncnnConfig.cmake")
+            message(STATUS "On-headset depth on the graphics chip: ncnn from ${FRAME_NCNN_DIR}")
+            find_package(ncnn REQUIRED CONFIG PATHS "${FRAME_NCNN_DIR}/lib/cmake/ncnn" NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
+            target_link_libraries(${LIBNAME} PRIVATE ncnn)
+            target_compile_definitions(${LIBNAME} PRIVATE NIGHTFALL_FRAME_NCNN)
+            if(NIGHTFALL_BUILD_FRAME_DEPTH_TEST)
+                target_link_libraries(frame_depth_test PRIVATE ncnn)
+                target_compile_definitions(frame_depth_test PRIVATE NIGHTFALL_FRAME_NCNN)
+            endif()
+        else()
+            message(STATUS "On-headset depth on the graphics chip: no ncnn at ${FRAME_NCNN_DIR} (steam-frame/build-ncnn.sh); left out")
+        endif()
+    else()
+        message(STATUS "On-headset depth: no LiteRT at ${FRAME_LITERT_DIR} (steam-frame/build-litert.sh); left out")
+    endif()
+endif()
 if(TARGET_PLATFORM STREQUAL "steamos" OR TARGET_PLATFORM STREQUAL "linux")
     target_compile_definitions(${LIBNAME} PRIVATE NIGHTFALL_PLATFORM_LINUX)
     if(AVAHI_FOUND)
@@ -226,6 +307,14 @@ if(TARGET_PLATFORM STREQUAL "steamos" OR TARGET_PLATFORM STREQUAL "linux")
             target_link_libraries(${LIBNAME} PRIVATE X11::Xrandr)
             target_compile_definitions(${LIBNAME} PRIVATE NIGHTFALL_HAS_XRANDR)
         endif()
+    endif()
+    if(TARGET_PLATFORM STREQUAL "steamos")
+        # FFmpeg's static arm64 assembly refers to its own tables in a way that
+        # only links into a shared library when symbols bind inside it. (Build
+        # 4i was linked like this too; the flag was only on the command line.)
+        # --as-needed: libatomic is listed below but arm64 doesn't use it, and
+        # the library should load with nothing beyond glibc and libstdc++.
+        target_link_options(${LIBNAME} PRIVATE "-Wl,-Bsymbolic" "-Wl,--as-needed")
     endif()
     if(TARGET_PLATFORM STREQUAL "linux")
         set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,-Bsymbolic")

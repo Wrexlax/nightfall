@@ -13,10 +13,14 @@ const GODOT_COMPONENTS := "<godot-components>"
 ## name, a note shown above the text, and the text's file.
 const ENTRIES := [
 	["Nightfall", "Nightfall is free software under the GNU General Public License, version 3. Source code: https://github.com/tB0nE/nightfall", "GPL-3.0.txt"],
+	["Nightfall for Steam Frame", "The Steam Frame build is an unofficial port of Nightfall, not made by Nightfall's author. It is free software under the same licence, the GNU General Public License, version 3; its source code is published with each release, at https://github.com/Wrexlax/nightfall. Its engine is Godot 4.7 with David Snopek's fix for foveated rendering on the Steam Frame (Godot pull request 124811) and a patch of this port's own.", "GPL-3.0.txt"],
+	["Moonlight XR for Frame", "The Steam Frame build's hardware video decoder (V4L2) is Moonlight XR for Frame's, as is the script its installer uses to add the Steam library entry; its launcher script and its LiteRT build recipe started from that project's. GNU General Public License, version 3. Source code: https://github.com/simplysanatori/moonlight-xr-steam-frame", "GPL-3.0.txt"],
+	["Moonlight XR", "The Steam Frame build's two LiteRT depth models are Moonlight XR's conversions of ZipDepth, by Sean Gilleece, unchanged. GNU General Public License, version 3. Source code: https://github.com/Gilleece/moonlight-android-xr", "GPL-3.0.txt"],
+	["whisper.cpp", "Voice typing in the Steam Frame build: whisper.cpp 1.9.5 with ggml, built from the copy in this port's source. The speech models are OpenAI's Whisper models in whisper.cpp's format (MIT licence too); the installer downloads them, they are not in the package.", "whisper.cpp.txt"],
 	["ALVR (optional DEV experiment)", "Pinned ALVR 20.14.1 client core. Included only when the experimental PCVR bridge is enabled. https://github.com/alvr-org/ALVR", "alvr.txt"],
 	["Browser ad blocking", "Brave adblock-rust 0.13.3 (MPL-2.0), JNI and pinned Rust dependencies. Unmodified upstream sources and licence notices follow.", "browser-adblock-dependencies.txt"],
 	["EasyList / EasyPrivacy", "Optional filter subscriptions by The EasyList authors (https://easylist.to/). Lists are downloaded directly, not bundled. Source and licensing: https://easylist.to/pages/licence.html and https://github.com/easylist/easylist. GPL version 3 or later option; no Acceptable Ads subscription.", "GPL-3.0.txt"],
-	["ZipDepth", "The EdgePad depth models are Nightfall's fine-tune of ZipDepth (https://github.com/fabiotosi92/ZipDepth).", "zipdepth.txt"],
+	["ZipDepth", "The EdgePad depth models are Nightfall's fine-tune of ZipDepth (https://github.com/fabiotosi92/ZipDepth). The Steam Frame build also runs ZipDepth's own models on the headset.", "zipdepth.txt"],
 	["Godot Engine", "", GODOT],
 	["Godot components", "Third-party components built into the Godot Engine.", GODOT_COMPONENTS],
 	["godot-cpp", "godot-cpp 4.4.", "godot-cpp.txt"],
@@ -35,7 +39,7 @@ const ENTRIES := [
 	["PyroWave", "The PyroWave video codec.", "pyrowave.txt"],
 	["Granite", "Bundled with PyroWave.", "granite.txt"],
 	["volk", "Bundled with PyroWave.", "volk.txt"],
-	["LiteRT", "LiteRT (TensorFlow Lite) runs the on-device depth models. Copyright The TensorFlow Authors. Apache License 2.0.", "tensorflow.txt"],
+	["LiteRT", "LiteRT (TensorFlow Lite) runs the on-device depth models (2.21.0 in the Steam Frame build). Copyright The TensorFlow Authors. Apache License 2.0.", "tensorflow.txt"],
 	["XNNPACK", "Bundled with LiteRT.", "xnnpack.txt"],
 	["pthreadpool", "Bundled with LiteRT.", "pthreadpool.txt"],
 	["cpuinfo", "Bundled with LiteRT.", "cpuinfo.txt"],
@@ -50,18 +54,37 @@ const ENTRIES := [
 	["fft2d", "Bundled with LiteRT.", "fft2d.txt"],
 	["OpenCL headers", "Compiled into LiteRT's GPU delegate. Copyright (c) 2008-2020 The Khronos Group Inc. Apache License 2.0.", "Apache-2.0.txt"],
 	["ncnn", "Runs depth models on Vulkan in the Linux build.", "ncnn.txt"],
+	["glslang", "Bundled with ncnn in the Steam Frame build: compiles its Vulkan shaders.", "glslang.txt"],
 	["Noto Sans CJK", "The Chinese, Japanese and Korean menu fonts (subsets).", "noto-cjk.txt"],
 ]
 
-static func names() -> PackedStringArray:
+## Components the Steam Frame build doesn't contain, so its page leaves them
+## out. Checked against the 8r package on 2026-11-18: the stream library has
+## no ALVR and no PyroWave decoder (Quest-only, with Granite and volk), the
+## Frame has no browser (its ad blocker, the filter lists), LiteRT is built
+## without its GPU delegate (the OpenCL headers), and OpenXR comes from
+## Godot's own module and SteamVR, without the OpenXR Vendors plugin (and
+## Meta's headers it is built with).
+const NOT_ON_FRAME: Array[String] = [
+	"ALVR (optional DEV experiment)", "Browser ad blocking", "EasyList / EasyPrivacy",
+	"OpenXR Vendors", "Meta OpenXR SDK", "PyroWave", "Granite", "volk", "OpenCL headers",
+]
+
+## The entries this build's page shows.
+static func entries(frame: bool = false) -> Array:
+	if not frame:
+		return ENTRIES
+	return ENTRIES.filter(func(entry): return not (entry[0] in NOT_ON_FRAME))
+
+static func names(frame: bool = false) -> PackedStringArray:
 	var result := PackedStringArray()
-	for entry in ENTRIES:
+	for entry in entries(frame):
 		result.append(entry[0])
 	return result
 
 ## The entry's text, line by line: its note, a blank line, then the licence.
-static func lines(index: int) -> PackedStringArray:
-	var entry: Array = ENTRIES[index]
+static func lines(index: int, frame: bool = false) -> PackedStringArray:
+	var entry: Array = entries(frame)[index]
 	var result := PackedStringArray()
 	if not String(entry[1]).is_empty():
 		result.append(entry[1])

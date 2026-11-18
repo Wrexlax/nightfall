@@ -16,6 +16,7 @@
 #include <deque>
 
 extern "C" {
+struct mlxr_vdec;
 #include <Limelight.h>
 #include <libavutil/pixfmt.h>
 #include <libavutil/frame.h>
@@ -50,6 +51,11 @@ public:
     int get_server_codec_mode_support() const;
 
     void set_local_capture_mode(bool enabled);
+    // When streaming through Nightfall Meteor, take the audio straight from
+    // Sunshine instead (Meteor's UDP relay drops a flow after 30 s of host
+    // silence, losing audio for the rest of the session). The value is
+    // Meteor's port offset; 0 keeps audio on the Meteor relay.
+    void set_direct_audio_port_offset(int offset);
     bool get_local_capture_mode() const;
 
     Ref<FfmpegDecoder> get_decoder() const;
@@ -67,6 +73,24 @@ public:
     int get_decode_queue_size() const;
     int get_last_frame_latency_us() const;
     int get_network_latency_ms() const;
+    // Steam Frame: the host's address on a second network path ("" for none),
+    // and what came over each path since. See 0004-second-link.patch.
+    void set_second_link(const godot::String &address);
+    // choice: -1 plain pings; 0 both links; 1 the second link first; 2 no
+    // second link. rev: the last pick in Meteor's menu seen, -1 for none.
+    // See LiSetSecondLinkChoice.
+    void set_second_link_choice(int choice, int rev);
+    // With choice 1: this device judges whether the second link can carry the
+    // stream alone and asks for both links whenever it can't. Only for a
+    // Meteor that says "link-hold". See LiSetSecondLinkWatch.
+    void set_second_link_watch(bool enabled);
+    // Asks the host for a keyframe (IDR) now; false when no stream is running.
+    bool request_keyframe();
+    // The control stream over the second link as well, so the stream outlives
+    // either link going silent. Only for a Meteor that says "control-both";
+    // off again at the start of every stream. See LiSetSecondLinkControl.
+    void set_second_link_control(bool enabled);
+    godot::Dictionary get_second_link_stats() const;
     Dictionary take_performance_stats();
     bool is_display_ready() const;
 
@@ -140,6 +164,22 @@ private:
     std::atomic<bool> h264_hw_upgraded_{false};
 
     Ref<FfmpegDecoder> decoder_;
+
+    // Steam Frame: direct V4L2 Iris decoder (src/video/frame/v4l2_decoder.c).
+    // vdec_mutex_ serialises open/close (decoder callbacks) with use (decode thread).
+    std::mutex vdec_mutex_;
+    mlxr_vdec *vdec_ = nullptr;
+    std::atomic<bool> use_vdec_{false};
+    std::atomic<int> vdec_pending_{0};
+    std::atomic<int> vdec_width_{0}, vdec_height_{0}; // AUs queued in the decoder whose picture is not out yet
+    struct VdecMapping { void *ptr = nullptr; size_t size = 0; uint32_t generation = 0; int fd = -1; };
+    std::vector<VdecMapping> vdec_maps_;
+    std::vector<uint8_t> vdec_pack_;
+    uint64_t vdec_frames_ = 0, vdec_errors_ = 0;
+    double vdec_copy_ms_sum_ = 0.0;
+    void _vdec_unmap_all();
+    void _vdec_close_locked();
+    void _vdec_process(const uint8_t *data, int size, int64_t pts, bool queue_empty);
     Ref<TextureUploader> uploader_;
     Ref<AudioRenderer> audio_renderer_;
     Ref<InputBridge> input_bridge_;

@@ -49,6 +49,18 @@ void OpusDecoderWrapper::cleanup() {
     }
 }
 
+int OpusDecoderWrapper::decode_plc(int frame_samples) {
+    if (!decoder_ || frame_samples <= 0) return -1;
+    last_pcm_.resize(frame_samples * channels_);
+    int frames = opus_multistream_decode_float(decoder_, nullptr, 0, last_pcm_.ptrw(), frame_samples, 0);
+    if (frames < 0) {
+        last_pcm_.resize(0);
+        return frames;
+    }
+    last_pcm_.resize(frames * channels_);
+    return frames;
+}
+
 int OpusDecoderWrapper::decode(const PackedByteArray &opus_data, int max_samples_per_frame) {
     if (!decoder_ || opus_data.is_empty()) return -1;
 

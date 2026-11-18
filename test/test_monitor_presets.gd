@@ -55,7 +55,7 @@ func _test_browser_layout_budget():
 
 func _test_default_presets_shape():
 	var presets = MonitorPresets.default_presets()
-	assert(presets.size() == 8)
+	assert(presets.size() == 9, "upstream's 8 and the second-screen-on-the-left one")
 	for p in presets:
 		assert(p.get("built_in") == true)
 		var screens: Array = p.get("screens", [])

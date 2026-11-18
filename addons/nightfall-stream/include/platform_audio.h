@@ -17,6 +17,8 @@ public:
     virtual int get_latency_ms() const = 0;
 
     virtual std::string get_backend_name() const = 0;
+    // Optional one-line buffer diagnostics (underruns etc.) for the log.
+    virtual std::string get_debug_stats() const { return std::string(); }
 };
 
 } // namespace nightfall

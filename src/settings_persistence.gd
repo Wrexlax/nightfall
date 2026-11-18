@@ -41,6 +41,44 @@ static func write_app(config: ConfigFile, settings: AppSettings) -> void:
 	config.set_value("local_capture", "restore_token", settings.pipewire_restore_token)
 	config.set_value("stream", "usb_link_enabled", settings.usb_link_enabled)
 	config.set_value("stream", "hdr_enabled", settings.hdr_enabled)
+	config.set_value("stream", "play_audio_on_pc", settings.play_audio_on_pc)
+	config.set_value("controller", "show_controller_models", settings.show_controller_models)
+	config.set_value("controller", "sleep_when_put_down", settings.sleep_when_put_down)
+	config.set_value("controller", "gamepad_face_swap", settings.gamepad_face_swap)
+	config.set_value("controller", "gamepad_layout", settings.gamepad_layout)
+	config.set_value("controller", "cursor_follow", settings.cursor_follow)
+	config.set_value("controller", "show_pointer_ray", settings.show_pointer_ray)
+	config.set_value("screen", "icon_backdrop", settings.icon_backdrop)
+	config.set_value("display", "frame_flat_3d", settings.frame_flat_3d)
+	config.set_value("display", "frame_fast_filter", settings.frame_fast_filter)
+	config.set_value("display", "frame_foveation", settings.frame_foveation)
+	config.set_value("display", "frame_layer_match_stream", settings.frame_layer_match_stream)
+	config.set_value("display", "frame_depth_model", settings.frame_depth_model)
+	config.set_value("display", "frame_depth_rate", settings.frame_depth_rate)
+	config.set_value("display", "frame_camera_limit", settings.frame_camera_limit)
+	config.set_value("display", "frame_curve_amount", settings.frame_curve_amount)
+	config.set_value("display", "ambient_strength", settings.ambient_strength)
+	config.set_value("display", "ambient_size", settings.ambient_size)
+	config.set_value("display", "keyboard_trackpad", settings.keyboard_trackpad)
+	config.set_value("display", "keyboard_panel", settings.keyboard_panel)
+	config.set_value("controller", "haptics", settings.haptics)
+	config.set_value("controller", "mic_key_mode", settings.mic_key_mode)
+	config.set_value("display", "head_lock", settings.head_lock)
+	config.set_value("display", "head_lock_last_on", settings.head_lock_last_on)
+	config.set_value("display", "keep_room_position", settings.keep_room_position)
+	config.set_value("display", "screen_start_distance", settings.screen_start_distance)
+	config.set_value("controller", "voice_require_prefix", settings.voice_require_prefix)
+	config.set_value("controller", "voice_confirm", settings.voice_confirm)
+	config.set_value("controller", "voice_commands", settings.voice_commands)
+	config.set_value("display", "frame_meteor_hint_hidden", settings.frame_meteor_hint_hidden)
+	config.set_value("display", "frame_logging", settings.frame_logging)
+	config.set_value("controller", "voice_model", settings.voice_model)
+	config.set_value("controller", "frame_voice_eases_depth", settings.frame_voice_eases_depth)
+	config.set_value("display", "frame_link_mode", settings.frame_link_mode)
+	config.set_value("display", "frame_link_untold", settings.frame_link_untold)
+	config.set_value("display", "keyboard_follows_screen", settings.keyboard_follows_screen)
+	config.set_value("display", "menu_spot", settings.menu_spot)
+	config.set_value("display", "keyboard_spot", settings.keyboard_spot)
 	config.set_value("general", "language", settings.language)
 
 static func read_app(
@@ -102,7 +140,7 @@ static func read_app(
 	if saved_steady is bool:
 		settings.pointer_steady = 1 if saved_steady else 0
 	else:
-		settings.pointer_steady = clampi(int(saved_steady), 0, 3)
+		settings.pointer_steady = clampi(int(saved_steady), 0, 4)
 	settings.double_click_mode = clampi(config.get_value(
 		"screen", "double_click_mode", AppSettings.DEFAULT_DOUBLE_CLICK_MODE), 0, 1)
 	settings.mouse_follows_pointer = bool(config.get_value(
@@ -110,7 +148,7 @@ static func read_app(
 	settings.high_refresh_rates = bool(config.get_value(
 		"screen", "high_refresh_rates", AppSettings.DEFAULT_HIGH_REFRESH_RATES))
 	var fade := int(config.get_value("screen", "passthrough_fade_pct", AppSettings.DEFAULT_PASSTHROUGH_FADE_PCT))
-	settings.passthrough_fade_pct = fade if PassthroughFade.FADE_VALUES.has(fade) else AppSettings.DEFAULT_PASSTHROUGH_FADE_PCT
+	settings.passthrough_fade_pct = fade if PassthroughFade.valid(fade) else AppSettings.DEFAULT_PASSTHROUGH_FADE_PCT
 	settings.codec_preference = config.get_value(
 		"screen", "codec_preference", AppSettings.DEFAULT_CODEC_PREFERENCE)
 	settings.grid_mode_enabled = config.get_value(
@@ -134,7 +172,9 @@ static func read_app(
 		"stream", "quick_start", AppSettings.DEFAULT_QUICK_START_ENABLED)
 	settings.audio_boost_db = config.get_value(
 		"stream", "audio_boost_db", AppSettings.DEFAULT_AUDIO_BOOST_DB)
-	if not AUDIO_BOOST_VALUES.has(settings.audio_boost_db):
+	# Steam Frame also allows quieter levels (multiples of 3 dB down to -45) and -60 = mute.
+	var frame_ok: bool = settings.audio_boost_db == -60 or (settings.audio_boost_db >= -45 and settings.audio_boost_db <= 12 and settings.audio_boost_db % 3 == 0)
+	if not AUDIO_BOOST_VALUES.has(settings.audio_boost_db) and not frame_ok:
 		settings.audio_boost_db = AppSettings.DEFAULT_AUDIO_BOOST_DB
 	settings.android_audio_output = clampi(int(config.get_value("stream", "android_audio_output", 0)), 0, 1)
 	settings.microphone_enabled = config.get_value(
@@ -145,6 +185,57 @@ static func read_app(
 		"local_capture", "restore_token", AppSettings.DEFAULT_PIPEWIRE_RESTORE_TOKEN)
 	settings.usb_link_enabled = config.get_value(
 		"stream", "usb_link_enabled", AppSettings.DEFAULT_USB_LINK_ENABLED)
+	settings.play_audio_on_pc = config.get_value("stream", "play_audio_on_pc", false)
+	settings.show_controller_models = config.get_value("controller", "show_controller_models", true)
+	settings.sleep_when_put_down = bool(config.get_value("controller", "sleep_when_put_down", true))
+	settings.gamepad_face_swap = config.get_value("controller", "gamepad_face_swap", false)
+	settings.gamepad_layout = clampi(config.get_value("controller", "gamepad_layout", 1 if settings.gamepad_face_swap else 0), 0, 2)
+	settings.cursor_follow = config.get_value("controller", "cursor_follow", false)
+	settings.show_pointer_ray = config.get_value("controller", "show_pointer_ray", true)
+	settings.icon_backdrop = config.get_value("screen", "icon_backdrop", true)
+	settings.frame_flat_3d = config.get_value("display", "frame_flat_3d", false)
+	settings.frame_fast_filter = bool(config.get_value("display", "frame_fast_filter", true))
+	settings.frame_foveation = clampi(int(config.get_value("display", "frame_foveation", 0)), 0, 3)
+	settings.frame_layer_match_stream = bool(config.get_value("display", "frame_layer_match_stream", true))
+	settings.frame_depth_model = clampi(int(config.get_value("display", "frame_depth_model", 0)), 0, SettingsController.FRAME_DEPTH_LABELS.size() - 1)
+	settings.frame_depth_rate = int(config.get_value("display", "frame_depth_rate", SettingsController.FRAME_DEPTH_RATE_AUTO))
+	if not SettingsController.AI3D_HZ_CAP_VALUES.has(settings.frame_depth_rate):
+		settings.frame_depth_rate = SettingsController.FRAME_DEPTH_RATE_AUTO
+	# 7c and 7d kept a yes or no here: no was Off, yes is today's Auto.
+	var camera_limit = config.get_value("display", "frame_camera_limit", SettingsController.CAMERA_LIMIT_AUTO)
+	if camera_limit is bool:
+		settings.frame_camera_limit = SettingsController.CAMERA_LIMIT_AUTO if camera_limit else SettingsController.CAMERA_LIMIT_OFF
+	else:
+		settings.frame_camera_limit = clampi(int(camera_limit), 0, SettingsController.CAMERA_LIMIT_LABELS.size() - 1)
+	# Sliders move in 5% steps; snap older saved values onto that grid.
+	var curve_amt: int = clampi(config.get_value("display", "frame_curve_amount", -1), -1, 100)
+	settings.frame_curve_amount = curve_amt if curve_amt < 0 else snappedi(curve_amt, 5)
+	settings.ambient_strength = snappedi(clampi(config.get_value("display", "ambient_strength", 50), 0, 100), 5)
+	settings.keyboard_trackpad = config.get_value("display", "keyboard_trackpad", false)
+	settings.keyboard_panel = int(config.get_value("display", "keyboard_panel", 0))
+	settings.haptics = clampi(int(config.get_value("controller", "haptics", 1)), 0, 2)
+	settings.mic_key_mode = clampi(config.get_value("controller", "mic_key_mode", 0), 0, 1)
+	settings.head_lock = 0  # never start in Head Lock; the last style is remembered below
+	settings.head_lock_last_on = clampi(int(config.get_value("display", "head_lock_last_on", 1)), 1, 2)
+	settings.keep_room_position = bool(config.get_value("display", "keep_room_position", false))
+	settings.screen_start_distance = clampf(float(config.get_value("display", "screen_start_distance", AppSettings.SCREEN_START_DISTANCE_DEFAULT)),
+		AppSettings.SCREEN_START_DISTANCE_MIN, AppSettings.SCREEN_START_DISTANCE_MAX)
+	settings.voice_require_prefix = bool(config.get_value("controller", "voice_require_prefix", false))
+	settings.voice_confirm = bool(config.get_value("controller", "voice_confirm", true))
+	settings.voice_commands = bool(config.get_value("controller", "voice_commands", true))
+	settings.frame_meteor_hint_hidden = bool(config.get_value("display", "frame_meteor_hint_hidden", false))
+	settings.frame_logging = bool(config.get_value("display", "frame_logging", true))
+	settings.voice_model = clampi(int(config.get_value("controller", "voice_model", 0)), 0, 1)
+	settings.frame_voice_eases_depth = bool(config.get_value("controller", "frame_voice_eases_depth", true))
+	# 7s kept an on/off switch here: off is "Wi-Fi only" now.
+	var link_was_on := bool(config.get_value("display", "frame_second_link", true))
+	settings.frame_link_mode = clampi(int(config.get_value("display", "frame_link_mode",
+		FrameSecondLink.MODE_BOTH if link_was_on else FrameSecondLink.MODE_FIRST_ONLY)), 0, FrameSecondLink.MODE_LABELS.size() - 1)
+	settings.frame_link_untold = bool(config.get_value("display", "frame_link_untold", false))
+	settings.keyboard_follows_screen = bool(config.get_value("display", "keyboard_follows_screen", true))
+	settings.menu_spot = config.get_value("display", "menu_spot", [])
+	settings.keyboard_spot = config.get_value("display", "keyboard_spot", [])
+	settings.ambient_size = snappedi(clampi(config.get_value("display", "ambient_size", 35), 0, 100), 5)
 	settings.hdr_enabled = config.get_value(
 		"stream", "hdr_enabled", AppSettings.DEFAULT_HDR_ENABLED)
 	settings.language = str(config.get_value("general", "language", AppSettings.DEFAULT_LANGUAGE))
@@ -219,10 +310,10 @@ static func read_host(
 			if not [12, 15, 20, 30, 40, 60].has(host.ai_3d_hz_cap):
 				host.ai_3d_hz_cap = 20
 			host.ai_3d_separation_pct = config.get_value(section, "ai_3d_separation_pct", 75)
-			if not [50, 75, 100].has(host.ai_3d_separation_pct):
+			if not HostSettings.separation_valid(host.ai_3d_separation_pct):
 				host.ai_3d_separation_pct = 75
 			host.ai_3d_convergence_pct = config.get_value(section, "ai_3d_convergence_pct", 50)
-			if not [30, 40, 50, 60, 70].has(host.ai_3d_convergence_pct):
+			if not HostSettings.convergence_valid(host.ai_3d_convergence_pct):
 				host.ai_3d_convergence_pct = 50
 			if config.has_section_key(section, "ai_3d_cursor_position_v2"):
 				host.ai_3d_cursor_position = clampi(config.get_value(section, "ai_3d_cursor_position_v2", 0), -1, 1)

@@ -51,6 +51,7 @@ func start_stream(host_id: int, app_id: int, forced_resolution: Vector2i = Vecto
 		main.browser_prototype.stop(false)
 	main.screen_sources.focus_browser(null)
 	main.session_lifecycle.begin_connect()
+	_launch_started_msec = Time.get_ticks_msec()
 	main.welcome_screen.clear_notice()
 	_current_host_id = host_id
 	_current_app_id = app_id
@@ -98,6 +99,7 @@ func start_stream(host_id: int, app_id: int, forced_resolution: Vector2i = Vecto
 	# Ask Meteor first: what it offers (virtual monitors among it) decides which
 	# screens this launch requests, and the plan and launch options below read that.
 	_meteor = {}
+	_pc_muted = PC_MUTED_UNKNOWN
 	if not local_capture_mode and not _meteor_bypass:
 		_meteor = await _probe_meteor(host_id)
 		# Meteor answered this host before: one slow reply (the app busy resizing for a
@@ -105,6 +107,21 @@ func start_stream(host_id: int, app_id: int, forced_resolution: Vector2i = Vecto
 		if _meteor.is_empty() and main.settings.host.virtual_display_installed:
 			main._log("[METEOR] No answer from Meteor; asking once more")
 			_meteor = await _probe_meteor(host_id)
+		# Steam Frame: Meteor is the only source of AI 3D depth there, and a
+		# probe sent while the app is still starting up (auto-connect) can
+		# miss its 0.8 s. One missed answer used to mean a whole session
+		# without depth, and without a word in the log.
+		if _meteor.is_empty() and main.device_is_steam_frame:
+			for attempt in 2:
+				main._log("[METEOR] No answer from Meteor; asking again (%d of 2)" % (attempt + 1))
+				await main.get_tree().create_timer(0.4).timeout
+				_meteor = await _probe_meteor(host_id)
+				if not _meteor.is_empty():
+					break
+			if _meteor.is_empty():
+				main._log("[METEOR] Meteor didn't answer; streaming without it (no AI 3D depth or microphone this session)")
+				if main.settings.host.ai_3d_speed > 0 and main.ui_controller:
+					main.ui_controller.show_temporary_status("Nightfall Meteor didn't answer: no AI 3D this session. Check it's running on the PC, then reconnect.", 8.0)
 	_meteor_bypass = false
 
 	# Meteor's host plans the session's screens before launch. Ask which frame
@@ -186,6 +203,12 @@ func start_stream(host_id: int, app_id: int, forced_resolution: Vector2i = Vecto
 	options["packet_size"] = 1024
 	options["streaming_remotely"] = 2
 	options["surroundAudioInfo"] = 0xCA0203
+	# Steam Frame: don't also play the audio on the PC. With "play on host" the
+	# PC's real output device is captured, and pausing a video there produced a
+	# repeating, decaying tail (the pause buzz) in the stream; Moonlight XR
+	# streams with localAudioPlayMode=0 and has no buzz on the same PC.
+	if main.device_is_steam_frame:
+		options["local_audio_play_mode"] = 1 if main.settings.play_audio_on_pc else 0
 	if hdr_requested():
 		options["hdr_mode"] = 1
 	var screens := _screen_launch_options()
@@ -195,6 +218,7 @@ func start_stream(host_id: int, app_id: int, forced_resolution: Vector2i = Vecto
 	options.merge(screens)
 	if not _meteor.is_empty():
 		options[MeteorClient.HTTPS_PORT_OPTION] = int(_meteor["ports"]["https"])
+	_set_direct_audio(host_id)
 	main._ui_status_label.text = "Launching stream..."
 	_b().establish_stream(host_id, app_id, options, _on_v2_launch_response)
 	main._log("[STREAM] establish_stream called")
@@ -284,6 +308,8 @@ var _meteor: Dictionary = {}
 var _meteor_bypass := false
 # The address Meteor answered on, for its depth port.
 var _meteor_address := ""
+# The host's HTTPS port that Meteor was asked about (see probe_meteor_at).
+var _meteor_host_https_port := 0
 
 ## Meteor's host depth offer for the current stream (see
 ## MeteorClient.depth_info()), or {} when there's none or this build can't
@@ -299,7 +325,158 @@ func meteor_mic_info() -> Dictionary:
 	return MeteorClient.mic_info(_meteor)
 
 func meteor_address() -> String:
-	return _meteor_address
+	# Only while this stream has Meteor's answer in hand: the address stays
+	# from the last Meteor found, and a stream started while Meteor wasn't
+	# running was described as passing through it (7y log, 23:30).
+	return _meteor_address if not _meteor.is_empty() else ""
+
+## Whether the current stream passes through Nightfall Meteor.
+func through_meteor() -> bool:
+	return not meteor_address().is_empty()
+
+## Whether that Meteor says, where the Stream Link choice is read every couple
+## of seconds, if it is offering depth at that moment ("depth-live").
+func meteor_offers_depth_live() -> bool:
+	var fixes = _meteor.get("fixes", [])
+	return through_meteor() and fixes is Array and "depth-live" in fixes
+
+## Asks this stream's Meteor again what depth it offers and takes the answer
+## as this stream's offer; true when depth is offered now. "Host depth" can be
+## switched off and on in Meteor's menu during a stream, and the offer used to
+## be read at a stream's start only (so it took Reconnect Audio to get Meteor's
+## depth back). An answer from another Meteor than the stream's is not taken.
+func refresh_meteor_depth() -> bool:
+	var asked := _meteor
+	if not through_meteor() or _meteor_host_https_port <= 0:
+		return false
+	var info: Dictionary = await MeteorClient.probe(main, _meteor_address, _meteor_host_https_port)
+	if not is_same(asked, _meteor):
+		return not meteor_depth_info().is_empty()
+	if not info.is_empty() and MeteorClient.meteor_key(info) == MeteorClient.meteor_key(_meteor):
+		take_depth_offer(_meteor, info)
+	return not meteor_depth_info().is_empty()
+
+## Puts `answer`'s depth offer (or its absence) into `meteor`, the answer a
+## stream was started with; everything else in it stays as it was.
+static func take_depth_offer(meteor: Dictionary, answer: Dictionary) -> void:
+	if answer.get("depth", null) is Dictionary:
+		meteor["depth"] = answer["depth"]
+	else:
+		meteor.erase("depth")
+
+## Steam Frame: whether the Meteor this stream passes through sends copies of
+## the picture and sound over a second link when asked (FrameSecondLink).
+func meteor_offers_second_link() -> bool:
+	return offers_second_link(_meteor, _meteor_address)
+
+## Whether this stream's Meteor is the original with multipath (below).
+func meteor_speaks_plain_second_link() -> bool:
+	return not _meteor_address.is_empty() and speaks_plain_second_link(_meteor)
+
+## The same, for a Meteor's answer and the address it was found at. Two kinds
+## of Meteor do: this port's, which says so ("second-link", 0.9.0-sf3), and
+## the original's from 0.9.1, which has the same thing under the name
+## multipath and no list to say it in.
+static func offers_second_link(meteor: Dictionary, address: String) -> bool:
+	if address.is_empty():
+		return false
+	var fixes = meteor.get("fixes", [])
+	return (fixes is Array and "second-link" in fixes) or speaks_plain_second_link(meteor)
+
+## Whether this is the original Meteor with multipath (read in its source at
+## v0.9.1-preview.2, `meteor/src/proxy.rs`): it sends a copy of the picture
+## and sound to every address that sends a stream's own 20-byte ping, and
+## stops 3 seconds after the last one. A ping with this port's extra bytes is
+## not one to it, so the library is told to send them plain (choice -1 in
+## main.gd's apply_link_mode). It knows nothing of "Adapter first", of the
+## choice in its tray menu, or of the controls, microphone and depth over
+## both links: those all go by the list of fixes, which it doesn't have.
+static func speaks_plain_second_link(meteor: Dictionary) -> bool:
+	var fixes = meteor.get("fixes", [])
+	if fixes is Array and "second-link" in fixes:
+		return false
+	return version_at_least(String(meteor.get("version", "")), [0, 9, 1])
+
+## Whether that Meteor can also be asked for the second link alone.
+func meteor_offers_second_link_only() -> bool:
+	var fixes = _meteor.get("fixes", [])
+	return meteor_offers_second_link() and "second-link-only" in fixes
+
+## Whether it also keeps the Stream Link choice in step with its own menu.
+func meteor_offers_link_sync() -> bool:
+	var fixes = _meteor.get("fixes", [])
+	return meteor_offers_second_link() and "link-sync" in fixes
+
+## Whether it also takes "both links for now" from a headset on Adapter first.
+func meteor_offers_link_hold() -> bool:
+	var fixes = _meteor.get("fixes", [])
+	return meteor_offers_link_sync() and "link-hold" in fixes
+
+## Whether it takes the controls from either of a headset's links as one
+## headset, and answers over both.
+func meteor_offers_control_both() -> bool:
+	var fixes = _meteor.get("fixes", [])
+	return meteor_offers_second_link() and "control-both" in fixes
+
+## Whether it takes the microphone and depth connections from a headset's
+## second link as that headset's.
+func meteor_offers_side_both() -> bool:
+	var fixes = _meteor.get("fixes", [])
+	return meteor_offers_second_link() and "side-both" in fixes
+
+## The key of this stream's Meteor ("" without one), and the port its
+## "are you Meteor" question needs (MeteorClient.probe).
+func meteor_key() -> String:
+	return MeteorClient.meteor_key(_meteor)
+
+## Asks whatever answers at `address` whether it is Meteor in front of this
+## stream's host; {} if not. For a second address of the same PC.
+func probe_meteor_at(address: String) -> Dictionary:
+	if _meteor_host_https_port <= 0:
+		return {}
+	return await MeteorClient.probe(main, address, _meteor_host_https_port)
+
+## The Stream Link choice as this stream's Meteor has it (MeteorClient.link_pick).
+func meteor_link_pick() -> Dictionary:
+	if _meteor_host_https_port <= 0 or meteor_address().is_empty():
+		return {}
+	var pick: Dictionary = await MeteorClient.link_pick(main, meteor_address(), _meteor_host_https_port)
+	note_pc_muted(pick)
+	return pick
+
+## Steam Frame: whether this stream's Meteor presses media keys on the PC
+## when asked ("media-keys", Meteor 0.9.0-sf13 on Windows). The keyboard only
+## offers its Media panel when it does: sent down the stream, those keys
+## arrive in Windows as letters.
+static func offers_media_keys(meteor: Dictionary, address: String) -> bool:
+	var fixes = meteor.get("fixes", [])
+	return not address.is_empty() and fixes is Array and "media-keys" in fixes
+
+func meteor_presses_media_keys() -> bool:
+	return offers_media_keys(_meteor, meteor_address())
+
+## Asks it to press one (MeteorClient.MEDIA_KEYS). True when it did.
+func press_media_key(key: String) -> bool:
+	if _meteor_host_https_port <= 0 or not meteor_presses_media_keys():
+		return false
+	var answer: Dictionary = await MeteorClient.media_key(main, meteor_address(), _meteor_host_https_port, key)
+	note_pc_muted(answer)
+	return not answer.is_empty()
+
+## Whether the PC's sound is muted, as Meteor last said (0.9.0-sf14: with
+## each media key it presses, and every couple of seconds where the Stream
+## Link choice is read): PC_MUTED_UNKNOWN until it has, and whenever this
+## stream's Meteor can't press media keys.
+const PC_MUTED_UNKNOWN := -1
+var _pc_muted := PC_MUTED_UNKNOWN
+
+func pc_muted() -> int:
+	return _pc_muted if meteor_presses_media_keys() else PC_MUTED_UNKNOWN
+
+## Takes "muted" from one of Meteor's answers, if it is there.
+func note_pc_muted(answer: Dictionary) -> void:
+	if answer.get("muted", null) is bool:
+		_pc_muted = 1 if answer["muted"] else 0
 
 # The HTTPS port Meteor's proxy listens on for this host (what launch/resume use), or 0.
 func meteor_https_port() -> int:
@@ -320,6 +497,69 @@ func post_meteor_virtual(count: int, callback: Callable) -> void:
 		callback.call(false, {})
 		return
 	await MeteorClient.post_virtual(main, _meteor_address, sunshine_https, count, callback)
+# Meteor's UDP relay drops a flow after 30 s without host traffic, so a quiet
+# desktop loses its audio for the rest of the stream. Video and depth still go
+# through Meteor; the audio is taken straight from Sunshine, whose ports are
+# Meteor's minus Meteor's port offset.
+func _meteor_version_at_least(version: String, want: Array) -> bool:
+	return version_at_least(version, want)
+
+## "0.9.1-preview.2" is at least [0, 9, 1]: each part counts by the number it
+## begins with.
+static func version_at_least(version: String, want: Array) -> bool:
+	var parts := version.split(".")
+	for i in want.size():
+		var have := int(parts[i]) if i < parts.size() else 0
+		if have != int(want[i]):
+			return have > int(want[i])
+	return true
+
+# Whether this Meteor has the Steam Frame port's "quiet flows" fix. Meteor
+# built from this tree says so in its discovery reply ("fixes"). The port's
+# own earlier builds (0.1.2 - 0.1.4) had the fix before that list existed.
+# The version number alone can't tell: upstream's official Meteor 0.9.0 is
+# newer than 0.1.2 but doesn't have the fix, so it gets the direct-audio
+# workaround like 0.1.1 did.
+func _meteor_keeps_quiet_flows() -> bool:
+	return keeps_quiet_flows(_meteor)
+
+## The original Meteor has the fix from 0.9.1 (its commit b7dc8c4, "keep a
+## quiet stream's audio flow while the client pings"), without a list to say
+## it in.
+static func keeps_quiet_flows(meteor: Dictionary) -> bool:
+	if meteor.is_empty():
+		return false
+	var fixes = meteor.get("fixes", [])
+	if fixes is Array and "quiet-flows" in fixes:
+		return true
+	var version := String(meteor.get("version", ""))
+	if version_at_least(version, [0, 9, 1]):
+		return true
+	return version_at_least(version, [0, 1, 2]) and not version_at_least(version, [0, 2, 0])
+
+func _set_direct_audio(host_id: int) -> void:
+	var v2 = _b()._v2
+	var conn = v2.get_stream_connection() if v2 and v2.has_method("get_stream_connection") else null
+	if not conn or not conn.has_method("set_direct_audio_port_offset"):
+		main._log("[METEOR] Direct audio unavailable (no stream connection)")
+		return
+	var offset := 0
+	# A Meteor with the "quiet flows" fix keeps its UDP flows open while the
+	# client is still sending, so the audio can go through it like everything
+	# else again.
+	if _meteor_keeps_quiet_flows():
+		conn.set_direct_audio_port_offset(0)
+		main._log("[METEOR] Meteor %s keeps quiet flows open; audio goes through it" % _meteor.get("version", ""))
+		return
+	if not _meteor.is_empty():
+		for host in _b().get_hosts():
+			if host.get("id") == host_id:
+				offset = int(_meteor["ports"].get("https", 0)) - int(host.get("https_port", 47984))
+		if offset <= 0:
+			offset = 0
+	conn.set_direct_audio_port_offset(offset)
+	if offset > 0:
+		main._log("[METEOR] Audio will come straight from Sunshine (Meteor port offset %d)" % offset)
 
 func _probe_meteor(host_id: int) -> Dictionary:
 	main.welcome_screen.get_xr_control().set_discovered_host("", {})
@@ -334,6 +574,7 @@ func _probe_meteor(host_id: int) -> Dictionary:
 		if not info.is_empty():
 			# Zoned for USB Link, so the depth and microphone sockets reach it.
 			_meteor_address = MeteorClient.zone_address(address)
+			_meteor_host_https_port = int(host.get("https_port", 47984))
 			main.welcome_screen.get_xr_control().set_discovered_host(_meteor_address, info)
 			var ports: Dictionary = info["ports"]
 			main._log("[METEOR] Found Nightfall Meteor %s on %s; streaming through it (https %d, rtsp %d, video %d)" % [
@@ -770,6 +1011,8 @@ func resize_stream_viewport(w: int, h: int, update_geometry: bool = true):
 			var comp_size = stream_size
 			if main.settings.bezel_enabled and main.comp.in_use:
 				comp_size += Vector2i(16, 16)
+			if main.device_is_steam_frame:
+				comp_size = s.comp_base_size + Vector2i(16, 16)
 			if s.comp_viewport and s.comp_viewport.size != comp_size:
 				s.comp_viewport.size = comp_size
 			if s.comp_viewport_left and s.comp_viewport_left.size != comp_size:
@@ -818,13 +1061,39 @@ func resize_stream_viewport(w: int, h: int, update_geometry: bool = true):
 				cm.set_shader_parameter("blur_scale", main.get_blur_scale(s))
 	main._log("[STREAM] Viewport resized to %dx%d (blur_scale=%.2f)" % [w, h, main.get_blur_scale(main.primary_screen)])
 
+## When start_stream() last began a launch (ticks, ms); 0 before the first.
+var _launch_started_msec := 0
+## A launch is given this long before Connect may start another beside it.
+const CONNECT_GUARD_MSEC := 10000
+
+## Whether a launch has started and not yet led anywhere, so that another one
+## must not be started beside it. Connect pressed while Quick Start is
+## connecting sent two launches to the PC a moment apart; its host refused the
+## second ("Another stream operation is still running") and that failure took
+## the first down too (logs of 2026-11-17, 18:12 and 18:34).
+##
+## Asked by the welcome screen BEFORE it arms its timeout, because arming puts
+## the session into "connecting" by itself. 8c to 8e asked inside
+## on_pair_pressed(), after that: every press of Connect looked like a second
+## one, was left alone, and timed out ten seconds later (log of 2026-11-17
+## 19:48, eight times in a row). And only for CONNECT_GUARD_MSEC, so a launch
+## that never answers can't keep Connect shut.
+static func launch_in_flight(phase: int, launch_started_msec: int, now_msec: int) -> bool:
+	return phase == SessionLifecycle.Phase.CONNECTING and launch_started_msec > 0 \
+		and now_msec - launch_started_msec < CONNECT_GUARD_MSEC
+
+func launch_is_in_flight() -> bool:
+	return launch_in_flight(main.session_lifecycle.phase, _launch_started_msec, Time.get_ticks_msec())
+
+## Whether a connection was started by hand while Quick Start waited its second.
+static func connection_under_way(phase: int) -> bool:
+	return phase in [SessionLifecycle.Phase.CONNECTING, SessionLifecycle.Phase.STREAMING,
+		SessionLifecycle.Phase.RESTARTING, SessionLifecycle.Phase.RECONNECTING]
+
 func on_pair_pressed():
 	var raw_text = main.get_node("%IPInput").text
 	main.get_node("%Numpad").visible = false
 	if raw_text.is_empty(): raw_text = "127.0.0.1"
-	var save = ConfigFile.new()
-	save.set_value("connection", "ip", raw_text)
-	save.save("user://last_connection.cfg")
 	if _b().get_config_manager():
 		_b().get_config_manager().load_config()
 	# Optional "ip:port" suffix (see main.parse_ip_port()) - host records only
@@ -837,10 +1106,11 @@ func on_pair_pressed():
 	# Several saved hosts can share an address (a bundled host next to the
 	# user's own, on another port): the one picked in the server list wins,
 	# else the first.
-	var paired_host_id = -1
-	for h in _b().get_hosts():
-		if main.host_matches_address(h, ip) and (paired_host_id == -1 or h.id == main.current_host_id):
-			paired_host_id = h.id
+	var paired_host: Dictionary = SavedHosts.pick(_b().get_hosts(), main.current_host_id, ip)
+	var paired_host_id: int = paired_host.get("id", -1)
+	# With the host's own id, so the next start finds this host again and not
+	# the first one saved at the address.
+	main.welcome_screen.save_last_ip(raw_text, paired_host.get("server_unique_id", ""))
 	if paired_host_id != -1:
 		main.current_host_id = paired_host_id
 		main._ui_status_label.text = "Connecting..."
@@ -853,7 +1123,11 @@ func on_pair_pressed():
 		await start_stream(paired_host_id, main._selected_app_id)
 	else:
 		main._ui_status_label.text = "Pairing with " + ip + "..."
+		main.welcome_screen.set_server_message("Pairing with %s... a PIN appears here once the PC asks for it." % ip)
 		main._log("[PAIR] Starting pair with %s:%d..." % [ip, pair_port])
+		# Steam Frame fix: the 10 s connect timeout must not cut off pairing
+		# while the user types the PIN on the host.
+		main.session_lifecycle.cancel_connect_timeout()
 		var pin = _b().start_pair(ip, pair_port)
 		main._log("[PAIR] start_pair completed (result type=%s)" % str(typeof(pin)))
 		if str(pin) == "" or str(pin) == "0":
@@ -873,6 +1147,13 @@ static func pair_failure_message(pair_ip: String, msg: String) -> String:
 		return ("Pairing over USB Link failed. The host must listen on IPv6: set "
 			+ "address_family = both in its config and restart it. On Windows, also allow "
 			+ "the host through the firewall on Public networks (the USB link is one).")
+	# Steam Frame port: plain-language hints for the failures seen while pairing.
+	if msg.contains("No server certificate"):
+		return "The PC refused to start pairing.\nOn the PC, open the Sunshine/Apollo web page, remove this headset from its paired clients (or Unpair All), restart the server there, then try again."
+	if msg.contains("step 5") or msg.contains("step 4"):
+		return "Pairing failed at the PC's final check.\nRemove this headset from the PC's paired clients, restart the server from its web page, and pair again."
+	if msg.contains("Could not connect"):
+		return "Couldn't reach the PC. Check that it is on, on the same network, and that Sunshine/Apollo is running."
 	return "Pairing failed: " + msg
 
 func on_pair_completed(success: bool, _msg: String):
@@ -885,9 +1166,12 @@ func on_pair_completed(success: bool, _msg: String):
 		if pair_ip.to_lower().begins_with("fe80:"):
 			main._log("[PAIR] USB Link pairing failed - host not listening on IPv6, or its firewall blocks the USB network")
 		main.welcome_screen.show_welcome_screen("server")
-		# The welcome screens can't show the menu's status line.
-		main.welcome_screen.show_notice(why)
+		# The welcome screens can't show the menu's status line. The server
+		# screen's own message line (which was showing "Pairing with...")
+		# carries the reason, so the separate notice panel isn't shown as well.
+		main.welcome_screen.set_server_message(why, true)
 		return
+	main.welcome_screen.set_server_message("")
 	main._ui_status_label.text = "Pairing successful, starting stream..."
 	# Settle delay (2026-08-26) - the mutual-TLS HTTPS endpoint (port 57984)
 	# that pairing's own stage 5 (phrase=pairchallenge) just used successfully
@@ -920,10 +1204,17 @@ func on_pair_completed(success: bool, _msg: String):
 	if not unique_id.is_empty():
 		for h in _b().get_hosts():
 			if h.get("server_unique_id", "") == unique_id:
+				# Whatever settings are loaded were for what the address meant
+				# before this PC answered (another host at the same address, or
+				# no saved PC at all); this PC's own are filed under its id.
+				var ip_input: LineEdit = main.get_node("%IPInput")
+				var loaded: String = main.state_manager.host_section(ip_input.text)
+				main.current_host_id = h.id
 				var saved_ip: String = h.get("localaddress", "")
-				if not saved_ip.is_empty() and saved_ip != main.get_node("%IPInput").text:
-					main.get_node("%IPInput").text = saved_ip
-					main.state_manager.load_host_state(saved_ip)
+				if not saved_ip.is_empty() and saved_ip != ip_input.text:
+					ip_input.text = saved_ip
+				if main.state_manager.host_section(ip_input.text) != loaded:
+					main.state_manager.load_host_state(ip_input.text)
 				break
 	main.welcome_screen.save_last_ip(main.get_node("%IPInput").text, unique_id)
 	var found = false

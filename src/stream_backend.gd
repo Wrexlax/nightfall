@@ -173,6 +173,11 @@ func send_keyboard_event(keycode: int, action: int, modifiers: int):
 	if _v2:
 		_v2.get_input_bridge().send_keyboard_event(keycode, action, modifiers)
 
+# Typed text (voice typing): sent as text in the encrypted input channel.
+func send_utf8_text(text: String) -> void:
+	if _v2 and not text.is_empty():
+		_v2.get_input_bridge().send_utf8_text(text)
+
 func send_scroll_event(clicks: int):
 	if _v2:
 		_v2.get_input_bridge().send_scroll(clicks)
@@ -238,6 +243,48 @@ func get_last_frame_latency() -> int:
 		return _v2.get_last_frame_latency_us()
 	return 0
 
+## Steam Frame: the host's address on a second network path, "" for none
+## (FrameSecondLink). Nothing happens where the library has no such thing.
+func set_second_link(address: String) -> void:
+	if _v2 and _v2.has_method("set_second_link"):
+		_v2.set_second_link(address)
+
+## What the second link's pings tell Meteor. choice: -1 nothing (plain pings),
+## 0 copies on both links, 1 the second link first, 2 no second link. rev: the
+## last pick in Meteor's own menu seen, -1 to send none.
+func set_second_link_choice(choice: int, rev: int) -> void:
+	if _v2 and _v2.has_method("set_second_link_choice"):
+		_v2.set_second_link_choice(choice, rev)
+
+## Asks the host for a keyframe now; false when it couldn't be asked (no
+## stream, or a native library that predates this).
+func request_keyframe() -> bool:
+	if _v2 and _v2.has_method("request_keyframe"):
+		return _v2.request_keyframe()
+	return false
+
+## "Adapter first": the headset itself judges whether the adapter's link can
+## carry the stream alone, and asks Meteor for both whenever it can't. Only
+## for a Meteor that knows the request ("link-hold").
+func set_second_link_watch(enabled: bool) -> void:
+	if _v2 and _v2.has_method("set_second_link_watch"):
+		_v2.set_second_link_watch(enabled)
+
+## The controls (and the connection's own "are you there") over the second
+## link as well, so a stream outlives either link going silent. Only for a
+## Meteor that takes both as one headset ("control-both"). The library turns
+## it off at the start of every stream: ask after the stream has started,
+## and before set_second_link(), which is what applies it.
+func set_second_link_control(enabled: bool) -> void:
+	if _v2 and _v2.has_method("set_second_link_control"):
+		_v2.set_second_link_control(enabled)
+
+## What came over each path since set_second_link(); {} without the feature.
+func second_link_stats() -> Dictionary:
+	if _v2 and _v2.has_method("get_second_link_stats"):
+		return _v2.get_second_link_stats()
+	return {}
+
 func get_network_latency_ms() -> int:
 	if _v2 and _v2.has_method("get_network_latency_ms"):
 		return _v2.get_network_latency_ms()
@@ -265,6 +312,31 @@ func set_depth_gpu_priority(priority: int):
 		var db = _v2.get_depth_bridge()
 		if db and db.has_method("set_depth_gpu_priority"):
 			db.set_depth_gpu_priority(priority)
+
+## On-headset depth fed straight from the video decoder (Steam Frame). False
+## from a native library without it, and then the calls below do nothing.
+func has_decoder_depth() -> bool:
+	var db = _v2.get_depth_bridge() if _v2 else null
+	return db != null and db.has_method("has_decoder_depth") and db.has_decoder_depth()
+
+func set_decoder_depth_enabled(enabled: bool) -> void:
+	if has_decoder_depth():
+		_v2.get_depth_bridge().set_decoder_depth_enabled(enabled)
+
+## Whether one of the headset's own depth models can be used here.
+func decoder_depth_model_present(model_index: int) -> bool:
+	if not has_decoder_depth():
+		return false
+	var db = _v2.get_depth_bridge()
+	return db.has_method("decoder_depth_model_present") and db.decoder_depth_model_present(model_index)
+
+## The part of each decoded frame to make depth for (the primary screen's).
+func set_decoder_depth_region(region: Vector4) -> void:
+	if has_decoder_depth():
+		_v2.get_depth_bridge().set_decoder_depth_region(region.x, region.y, region.z, region.w)
+
+func take_decoder_depth_report() -> String:
+	return _v2.get_depth_bridge().take_decoder_depth_report() if has_decoder_depth() else ""
 
 func set_depth_hz_cap(hz: int):
 	if _v2:

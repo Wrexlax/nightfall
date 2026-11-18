@@ -8,6 +8,13 @@
 #include "network/usb_link_bridge.h"
 #include "video/codec_defs.h"
 #include "ycbcr_to_rgba_spirv.h"
+#if defined(NIGHTFALL_PLATFORM_steamos)
+#include "video/frame/v4l2_decoder.h"
+#include <cstdlib>
+#include <sys/ioctl.h>
+#include <sys/mman.h>
+#include <linux/dma-buf.h>
+#endif
 #include <godot_cpp/classes/rendering_device.hpp>
 #include <godot_cpp/classes/rendering_server.hpp>
 #include <godot_cpp/classes/rd_shader_spirv.hpp>
@@ -39,6 +46,9 @@ extern "C" {
 }
 
 #include "nf_log.h"
+#ifdef NIGHTFALL_FRAME_DEPTH
+#include "frame_depth_engine.h"
+#endif
 
 extern "C" {
 #include <libavcodec/avcodec.h>
@@ -829,6 +839,41 @@ int StreamConnection::_cb_decoder_setup(int videoFormat, int width, int height, 
     NF_LOGE("StreamConnection", "FATAL: Unsupported video format 0x%x on Android", videoFormat);
     return -1;
 #else
+#if defined(NIGHTFALL_PLATFORM_steamos)
+    {
+        std::lock_guard<std::mutex> vlock(self->vdec_mutex_);
+        self->_vdec_close_locked();
+        self->use_vdec_.store(false);
+        const char *force_ff = getenv("NIGHTFALL_FFMPEG_DECODE");
+        const bool h265 = (videoFormat & VIDEO_FORMAT_MASK_H265) != 0;
+        const bool h264 = (videoFormat & VIDEO_FORMAT_MASK_H264) != 0;
+        if ((h264 || h265) && !(force_ff && *force_ff == '1')) {
+            mlxr_vdec_config cfg;
+            mlxr_vdec_config_defaults(&cfg);
+            cfg.codec = h265 ? MLXR_CODEC_HEVC : MLXR_CODEC_H264;
+            cfg.width_hint = (uint32_t)width;
+            cfg.height_hint = (uint32_t)height;
+            cfg.ubwc = false;
+            cfg.verbose = true;
+            mlxr_vdec *d = nullptr;
+            int r = mlxr_vdec_open(&cfg, &d);
+            if (r == MLXR_VDEC_OK && d) {
+                self->vdec_ = d;
+                self->vdec_frames_ = 0;
+                self->vdec_errors_ = 0;
+                self->vdec_copy_ms_sum_ = 0.0;
+                self->vdec_width_.store(width);
+                self->vdec_height_.store(height);
+                self->use_vdec_.store(true);
+                NF_LOG("StreamConnection", "Steam Frame V4L2 decoder opened (%s %dx%d)", h265 ? "HEVC" : "H264", width, height);
+                self->uploader_->setup(width, height, AV_PIX_FMT_NV12, (int)AVCOL_SPC_BT709, (int)AVCOL_RANGE_UNSPECIFIED);
+                self->decoder_ready_.store(true);
+                return 0;
+            }
+            NF_LOGE("StreamConnection", "Steam Frame V4L2 decoder open failed: %s - falling back to FFmpeg", mlxr_vdec_status_str(r));
+        }
+    }
+#endif
     int ret = self->decoder_->setup(videoFormat, width, height, false);
     if (ret != 0) {
         NF_LOGE("StreamConnection", "Decoder setup FAILED: ret=%d", ret);
@@ -907,6 +952,13 @@ void StreamConnection::_cb_decoder_cleanup() {
     self->_retire_all_ahb_imports();
 #endif
 
+#if defined(NIGHTFALL_PLATFORM_steamos)
+    {
+        std::lock_guard<std::mutex> vlock(self->vdec_mutex_);
+        self->use_vdec_.store(false);
+        self->_vdec_close_locked();
+    }
+#endif
     if (!self->local_capture_mode_) {
         self->decoder_->cleanup();
         self->uploader_->cleanup();
@@ -1080,8 +1132,29 @@ void StreamConnection::_cb_stage_starting(int stage) {
     }
 }
 
+// moonlight-common-c's audio port (Connection.c), parsed from the RTSP SETUP
+// reply during the handshake and read when the audio stream starts.
+extern "C" uint16_t AudioPortNumber;
+extern "C" uint16_t ControlPortNumber;
+static std::atomic<int> g_direct_audio_offset{0};
+
+void StreamConnection::set_direct_audio_port_offset(int offset) {
+    g_direct_audio_offset.store(offset > 0 ? offset : 0);
+}
+
 void StreamConnection::_cb_stage_complete(int stage) {
     NF_LOG("StreamConnection", "Stage complete: %s", LiGetStageName(stage));
+    if (stage == STAGE_RTSP_HANDSHAKE) {
+        int offset = g_direct_audio_offset.load();
+        if (offset > 0 && AudioPortNumber > offset) {
+            uint16_t relayed = AudioPortNumber;
+            AudioPortNumber = (uint16_t)(AudioPortNumber - offset);
+            NF_LOG("StreamConnection", "Audio straight from Sunshine: port %u (Meteor relay %u bypassed)", AudioPortNumber, relayed);
+        }
+        // (2f tried sending the control stream straight to Sunshine too; with
+        // RTSP still going through Meteor the host then never started the
+        // stream, so control stays on the Meteor relay.)
+    }
     auto *self = active_instance_;
     if (self) {
         self->call_deferred("emit_signal", "stage_complete", String(LiGetStageName(stage)));
@@ -1265,6 +1338,154 @@ void StreamConnection::_connection_thread_func() {
     }
 }
 
+#if defined(NIGHTFALL_PLATFORM_steamos)
+void StreamConnection::_vdec_unmap_all() {
+    for (auto &m : vdec_maps_) {
+        if (m.ptr) munmap(m.ptr, m.size);
+        m = VdecMapping();
+    }
+}
+
+void StreamConnection::_vdec_close_locked() {
+    _vdec_unmap_all();
+    vdec_pending_.store(0);
+    if (vdec_) {
+        mlxr_vdec_stats st;
+        mlxr_vdec_get_stats(vdec_, &st);
+        NF_LOG("StreamConnection", "V4L2 decoder closing: aus=%llu dropped=%llu frames=%llu errors=%llu source_changes=%llu",
+               (unsigned long long)st.aus_submitted, (unsigned long long)st.aus_dropped,
+               (unsigned long long)st.frames_out, (unsigned long long)st.frames_error,
+               (unsigned long long)st.source_changes);
+        mlxr_vdec_close(vdec_);
+        vdec_ = nullptr;
+    }
+}
+
+void StreamConnection::_vdec_process(const uint8_t *data, int size, int64_t pts, bool queue_empty) {
+    std::lock_guard<std::mutex> vlock(vdec_mutex_);
+    if (!vdec_) return;
+
+    int r = data ? mlxr_vdec_submit(vdec_, data, (uint32_t)size, pts) : MLXR_VDEC_OK;
+    if (r != MLXR_VDEC_OK) {
+        if (++vdec_errors_ <= 20 || (vdec_errors_ % 100) == 0)
+            NF_LOGE("StreamConnection", "V4L2 submit: %s (#%llu)", mlxr_vdec_status_str(r), (unsigned long long)vdec_errors_);
+        if (mlxr_vdec_needs_idr(r)) LiRequestIdrFrame();
+    }
+
+    // Wait briefly for the picture of the AU just queued when nothing else is
+    // waiting, so it is shown now rather than one packet later.
+    int timeout = queue_empty ? 6 : 0;
+    for (int guard = 0; guard < 32; guard++) {
+        mlxr_vframe f;
+        r = mlxr_vdec_receive(vdec_, &f, timeout);
+        timeout = 0;
+        if (r == MLXR_VDEC_AGAIN) break;
+        if (r == MLXR_VDEC_FORMAT_CHANGE) {
+            NF_LOG("StreamConnection", "V4L2 decoder: mid-stream format change");
+            _vdec_unmap_all();
+            int ar = mlxr_vdec_apply_format_change(vdec_);
+            if (ar != MLXR_VDEC_OK) {
+                NF_LOGE("StreamConnection", "V4L2 apply_format_change: %s", mlxr_vdec_status_str(ar));
+                LiRequestIdrFrame();
+                break;
+            }
+            continue;
+        }
+        if (r < 0) {
+            if (++vdec_errors_ <= 20 || (vdec_errors_ % 100) == 0)
+                NF_LOGE("StreamConnection", "V4L2 receive: %s (#%llu)", mlxr_vdec_status_str(r), (unsigned long long)vdec_errors_);
+            if (mlxr_vdec_needs_idr(r)) LiRequestIdrFrame();
+            break;
+        }
+
+        // Map the CAPTURE buffer (cached per index + generation).
+        if (vdec_maps_.size() <= f.index) vdec_maps_.resize(f.index + 1);
+        VdecMapping &m = vdec_maps_[f.index];
+        if (!m.ptr || m.generation != f.generation || m.fd != f.fd[0]) {
+            if (m.ptr) munmap(m.ptr, m.size);
+            m = VdecMapping();
+            void *p = mmap(nullptr, (size_t)f.object_size, PROT_READ, MAP_SHARED, f.fd[0], 0);
+            if (p == MAP_FAILED) {
+                NF_LOGE("StreamConnection", "V4L2 mmap of buffer %u failed (errno %d)", f.index, errno);
+                mlxr_vdec_release(vdec_, &f);
+                continue;
+            }
+            m.ptr = p;
+            m.size = (size_t)f.object_size;
+            m.generation = f.generation;
+            m.fd = f.fd[0];
+        }
+
+        const int w = (int)f.width & ~1;
+        const int h = (int)f.height & ~1;
+        vdec_width_.store(w);
+        vdec_height_.store(h);
+        const uint8_t *base = (const uint8_t *)m.ptr;
+        const uint8_t *y = base + f.offset[0];
+        const int y_pitch = (int)f.pitch[0];
+        const uint8_t *uv;
+        int uv_pitch;
+        if (f.num_planes >= 2) {
+            uv = base + f.offset[1];
+            uv_pitch = (int)f.pitch[1];
+        } else {
+            uv = base + f.offset[0] + (size_t)f.pitch[0] * f.coded_height;
+            uv_pitch = y_pitch;
+        }
+        const size_t uv_end = (size_t)(uv - base) + (size_t)uv_pitch * (h / 2);
+        if (uv_end > m.size || w <= 0 || h <= 0) {
+            NF_LOGE("StreamConnection", "V4L2 frame layout out of range (%ux%u pitch %u/%d size %zu)",
+                    f.width, f.height, f.pitch[0], uv_pitch, m.size);
+            mlxr_vdec_release(vdec_, &f);
+            continue;
+        }
+
+        auto t0 = std::chrono::steady_clock::now();
+        struct dma_buf_sync sync = { DMA_BUF_SYNC_START | DMA_BUF_SYNC_READ };
+        ioctl(f.fd[0], DMA_BUF_IOCTL_SYNC, &sync);
+
+        _record_rendered_frame(f.pts);
+        if (current_colorspace_ != AVCOL_SPC_BT709 || current_color_transfer_ != 0) {
+            current_colorspace_ = AVCOL_SPC_BT709;
+            current_color_range_ = AVCOL_RANGE_UNSPECIFIED;
+            current_color_transfer_ = 0;
+            uploader_->update_colorspace((int)AVCOL_SPC_BT709, (int)AVCOL_RANGE_UNSPECIFIED, 0);
+        }
+        if (!uploader_->update_from_nv12_strided(w, h, y, y_pitch, uv, uv_pitch)) {
+            const size_t ys = (size_t)w * h, uvs = (size_t)w * (h / 2);
+            vdec_pack_.resize(ys + uvs);
+            for (int row = 0; row < h; row++) memcpy(vdec_pack_.data() + (size_t)row * w, y + (size_t)row * y_pitch, w);
+            for (int row = 0; row < h / 2; row++) memcpy(vdec_pack_.data() + ys + (size_t)row * w, uv + (size_t)row * uv_pitch, w);
+            uploader_->update_from_raw_nv12(w, h, vdec_pack_.data(), (uint32_t)ys, (uint32_t)uvs);
+        }
+#ifdef NIGHTFALL_FRAME_DEPTH
+        // On-headset depth takes its picture here, while the decoder's memory
+        // is still mapped: after the upload, so the frame isn't held up by it.
+        FrameDepthEngine::tap_nv12(y, y_pitch, uv, uv_pitch, w, h);
+#endif
+
+        sync.flags = DMA_BUF_SYNC_END | DMA_BUF_SYNC_READ;
+        ioctl(f.fd[0], DMA_BUF_IOCTL_SYNC, &sync);
+        mlxr_vdec_release(vdec_, &f);
+
+        vdec_copy_ms_sum_ += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+        vdec_frames_++;
+        if (vdec_frames_ == 1 || (vdec_frames_ % 300) == 0) {
+            NF_LOG("StreamConnection", "V4L2 frame #%llu %ux%u (coded %ux%u pitch %u planes %u gen %u) copy avg %.2fms decode %.2fms%s",
+                   (unsigned long long)vdec_frames_, f.width, f.height, f.coded_width, f.coded_height, f.pitch[0],
+                   f.num_planes, f.generation, vdec_copy_ms_sum_ / (double)vdec_frames_,
+                   (double)(f.t_dequeue_ns - f.t_submit_ns) / 1e6, f.corrupt ? " corrupt" : "");
+        }
+    }
+
+    mlxr_vdec_stats st;
+    mlxr_vdec_get_stats(vdec_, &st);
+    long long pending = (long long)st.aus_submitted - (long long)st.aus_dropped
+                      - (long long)st.frames_out - (long long)st.frames_error;
+    vdec_pending_.store(pending > 0 ? (int)std::min<long long>(pending, 64) : 0);
+}
+#endif
+
 void StreamConnection::_decode_thread_func() {
     std::optional<DecodeUnitQueue::DecodeUnit> queued_unit;
     AVPacket *pkt = nullptr;
@@ -1297,6 +1518,16 @@ void StreamConnection::_decode_thread_func() {
         pkt = nullptr;
         {
             std::unique_lock<std::mutex> lock(queue_mutex_);
+#if defined(NIGHTFALL_PLATFORM_steamos)
+            // Pictures still inside the V4L2 decoder: wake every 2 ms to pick
+            // them up instead of waiting for the next packet (the host sends
+            // nothing while the screen is static, which left frames 40 ms late).
+            if (use_vdec_.load() && vdec_pending_.load() > 0) {
+                queue_cv_.wait_for(lock, std::chrono::milliseconds(2), [this] {
+                    return !packet_queue_.empty() || !is_streaming_.load();
+                });
+            } else
+#endif
             queue_cv_.wait(lock, [this
 #ifdef __ANDROID__
                                   , &native_input_blocked
@@ -1663,7 +1894,27 @@ void StreamConnection::_decode_thread_func() {
         }
 #endif
 
+#if defined(NIGHTFALL_PLATFORM_steamos)
+        if (!pkt && use_vdec_.load() && vdec_pending_.load() > 0) {
+            _vdec_process(nullptr, 0, 0, false);
+            continue;
+        }
+#endif
         if (!pkt) continue;
+
+#if defined(NIGHTFALL_PLATFORM_steamos)
+        if (use_vdec_.load()) {
+            bool queue_empty;
+            {
+                std::lock_guard<std::mutex> lock(queue_mutex_);
+                queue_empty = packet_queue_.empty();
+            }
+            _vdec_process(pkt->data, pkt->size, pkt->pts, queue_empty);
+            queued_unit.reset();
+            pkt = nullptr;
+            continue;
+        }
+#endif
 
         if (decoder_->is_raw_decode()) {
             if (pkt->size >= (int)sizeof(RawFrameHeader)) {
@@ -1703,7 +1954,8 @@ void StreamConnection::_decode_thread_func() {
                 continue;
             }
 
-            if (decoder_->is_hw_decode() && ctx->codec_id == AV_CODEC_ID_H264) {
+            const bool v4l2m2m = ctx->codec && ctx->codec->name && strstr(ctx->codec->name, "_v4l2m2m") != nullptr;
+            if (decoder_->is_hw_decode() && !v4l2m2m && ctx->codec_id == AV_CODEC_ID_H264) {
                 int out_size = pkt->size + 1024;
                 uint8_t *out = (uint8_t *)av_malloc(out_size + AV_INPUT_BUFFER_PADDING_SIZE);
                 if (out) {
@@ -1750,14 +2002,15 @@ void StreamConnection::_decode_thread_func() {
             }
 
             int send_ret = avcodec_send_packet(ctx, pkt);
-
-            queued_unit.reset();
-            pkt = nullptr;
+            int send_retries = 0;
 
             if (send_ret < 0 && send_ret != AVERROR(EAGAIN) && send_ret != AVERROR_EOF) {
+                queued_unit.reset();
+                pkt = nullptr;
                 continue;
             }
 
+receive_frames:
             while (true) {
                 AVFrame *tmp = av_frame_alloc();
                 int recv_ret = avcodec_receive_frame(ctx, tmp);
@@ -1874,6 +2127,21 @@ void StreamConnection::_decode_thread_func() {
                 }
                 av_frame_free(&tmp);
             }
+
+            // A hardware (V4L2 m2m) decoder answers EAGAIN while its input
+            // queue is full: the packet was NOT consumed. Frames were just
+            // drained above, so offer the same packet again instead of
+            // dropping it (dropping starved the decoder into IDR loops).
+            if (send_ret == AVERROR(EAGAIN) && send_retries < 50) {
+                send_retries++;
+                send_ret = avcodec_send_packet(ctx, pkt);
+                if (send_ret == AVERROR(EAGAIN)) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                }
+                goto receive_frames;
+            }
+            queued_unit.reset();
+            pkt = nullptr;
         }
     }
 
@@ -2134,6 +2402,83 @@ int StreamConnection::get_network_latency_ms() const {
     return -1;
 }
 
+void StreamConnection::set_second_link(const String &address) {
+#ifdef NIGHTFALL_SECOND_LINK
+    LiSetSecondLink(address.utf8().get_data());
+#else
+    (void)address;
+#endif
+}
+
+void StreamConnection::set_second_link_choice(int choice, int rev) {
+#ifdef NIGHTFALL_SECOND_LINK
+    LiSetSecondLinkChoice(choice, rev);
+#else
+    (void)choice;
+    (void)rev;
+#endif
+}
+
+void StreamConnection::set_second_link_control(bool enabled) {
+#ifdef NIGHTFALL_SECOND_LINK
+    LiSetSecondLinkControl(enabled);
+#else
+    (void)enabled;
+#endif
+}
+
+// A keyframe on request. The stream library asks for one by itself when the
+// client's own decoder needs it; this is for a need the client can't see.
+// Meteor's host depth decodes the same video on the PC and can only start at
+// a keyframe, so after "Host depth" was switched back on during a stream it
+// produced nothing until the client happened to ask for its own reasons
+// (2026-11-17 log: 12.5 minutes).
+bool StreamConnection::request_keyframe() {
+    if (!is_streaming_.load()) return false;
+    LiRequestIdrFrame();
+    return true;
+}
+
+void StreamConnection::set_second_link_watch(bool enabled) {
+#ifdef NIGHTFALL_SECOND_LINK
+    LiSetSecondLinkWatch(enabled);
+#else
+    (void)enabled;
+#endif
+}
+
+// Video packets since set_second_link(): first_link and second_link are what
+// arrived over each; of the packets old enough to judge, both, only_first and
+// only_second say which paths delivered them (only_second is what the second
+// link saved); second_first counts second-link copies that won the race.
+// Empty where the library has no second link.
+Dictionary StreamConnection::get_second_link_stats() const {
+    Dictionary d;
+#ifdef NIGHTFALL_SECOND_LINK
+    SECOND_LINK_STATS stats;
+    LiGetSecondLinkStats(&stats);
+    d["first_link"] = (int64_t)stats.firstLinkPackets;
+    d["second_link"] = (int64_t)stats.secondLinkPackets;
+    d["both"] = (int64_t)stats.bothLinks;
+    d["only_first"] = (int64_t)stats.onlyFirstLink;
+    d["only_second"] = (int64_t)stats.onlySecondLink;
+    d["second_first"] = (int64_t)stats.secondLinkFirst;
+    d["packets"] = (int64_t)stats.packets;
+    // "The second link first", judged on this device (LiSetSecondLinkWatch).
+    d["second_missing"] = (int64_t)stats.secondLinkMissing;
+    d["alone"] = stats.alone != 0;
+    d["holds"] = (int64_t)stats.holds;
+    d["alones"] = (int64_t)stats.alones;
+    d["hold_reason"] = (int64_t)stats.lastHoldReason;
+    d["hold_missing"] = (int64_t)stats.lastHoldMissing;
+    d["hold_answered_ms"] = (int64_t)stats.lastHoldAnsweredMs;
+    // The control stream's datagrams over each link (LiSetSecondLinkControl).
+    d["control_first"] = (int64_t)stats.controlFirstLink;
+    d["control_second"] = (int64_t)stats.controlSecondLink;
+#endif
+    return d;
+}
+
 void StreamConnection::_reset_performance_stats() {
     std::lock_guard<std::mutex> lock(performance_stats_mutex_);
     performance_stats_ = PerformanceStatsWindow{};
@@ -2235,11 +2580,13 @@ String StreamConnection::get_decoder_name() const {
     std::shared_ptr<AndroidMediaCodec> codec = _get_native_codec();
     if (codec && !codec->get_name().empty()) return String::utf8(codec->get_name().c_str());
 #endif
+    if (use_vdec_.load()) return "Steam Frame V4L2 (iris)";
     if (decoder_.is_valid()) return decoder_->get_decoder_name();
     return "";
 }
 
 int StreamConnection::get_video_width() const {
+    if (use_vdec_.load() && vdec_width_.load() > 0) return vdec_width_.load();
     if (decoder_.is_valid() && decoder_->get_video_width() > 0) return decoder_->get_video_width();
 #ifdef __ANDROID__
     if (native_video_width_ > 0) return native_video_width_;
@@ -2248,6 +2595,7 @@ int StreamConnection::get_video_width() const {
 }
 
 int StreamConnection::get_video_height() const {
+    if (use_vdec_.load() && vdec_height_.load() > 0) return vdec_height_.load();
     if (decoder_.is_valid() && decoder_->get_video_height() > 0) return decoder_->get_video_height();
 #ifdef __ANDROID__
     if (native_video_height_ > 0) return native_video_height_;
@@ -2259,6 +2607,7 @@ bool StreamConnection::is_hw_decode() const {
 #ifdef __ANDROID__
     if (_get_native_codec()) return true; // Native MediaCodec is always HW
 #endif
+    if (use_vdec_.load()) return true;
     if (decoder_.is_valid()) return decoder_->is_hw_decode();
     return false;
 }
@@ -2300,6 +2649,7 @@ void StreamConnection::_bind_methods() {
     ClassDB::bind_method(D_METHOD("stop"), &StreamConnection::stop);
     ClassDB::bind_method(D_METHOD("is_streaming"), &StreamConnection::is_streaming);
     ClassDB::bind_method(D_METHOD("set_local_capture_mode", "enabled"), &StreamConnection::set_local_capture_mode);
+    ClassDB::bind_method(D_METHOD("set_direct_audio_port_offset", "offset"), &StreamConnection::set_direct_audio_port_offset);
     ClassDB::bind_method(D_METHOD("get_local_capture_mode"), &StreamConnection::get_local_capture_mode);
     ClassDB::bind_method(D_METHOD("probe_video_format", "codec_preference", "disable_hw"), &StreamConnection::probe_video_format);
     ClassDB::bind_method(D_METHOD("probe_all_video_formats"), &StreamConnection::probe_all_video_formats);
@@ -2316,6 +2666,12 @@ void StreamConnection::_bind_methods() {
     ClassDB::bind_method(D_METHOD("get_decode_queue_size"), &StreamConnection::get_decode_queue_size);
     ClassDB::bind_method(D_METHOD("get_last_frame_latency_us"), &StreamConnection::get_last_frame_latency_us);
     ClassDB::bind_method(D_METHOD("get_network_latency_ms"), &StreamConnection::get_network_latency_ms);
+    ClassDB::bind_method(D_METHOD("set_second_link", "address"), &StreamConnection::set_second_link);
+    ClassDB::bind_method(D_METHOD("get_second_link_stats"), &StreamConnection::get_second_link_stats);
+    ClassDB::bind_method(D_METHOD("set_second_link_choice", "choice", "rev"), &StreamConnection::set_second_link_choice);
+    ClassDB::bind_method(D_METHOD("set_second_link_watch", "enabled"), &StreamConnection::set_second_link_watch);
+    ClassDB::bind_method(D_METHOD("request_keyframe"), &StreamConnection::request_keyframe);
+    ClassDB::bind_method(D_METHOD("set_second_link_control", "enabled"), &StreamConnection::set_second_link_control);
     ClassDB::bind_method(D_METHOD("take_performance_stats"), &StreamConnection::take_performance_stats);
     ClassDB::bind_method(D_METHOD("is_display_ready"), &StreamConnection::is_display_ready);
     ClassDB::bind_method(D_METHOD("get_decoder_name"), &StreamConnection::get_decoder_name);

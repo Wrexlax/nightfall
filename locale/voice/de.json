@@ -1,0 +1,259 @@
+{
+	"whisper": "de",
+	"on": [
+		"ein",
+		"an",
+		"einschalten",
+		"anschalten"
+	],
+	"off": [
+		"aus",
+		"ausschalten"
+	],
+	"next": [
+		"nächste",
+		"nächster",
+		"nächstes",
+		"weiter",
+		"wechseln"
+	],
+	"enable": [
+		"aktiviere",
+		"aktivieren"
+	],
+	"disable": [
+		"deaktiviere",
+		"deaktivieren"
+	],
+	"minus": [
+		"minus"
+	],
+	"plus": [
+		"plus"
+	],
+	"to": [
+		"auf",
+		"zu"
+	],
+	"drop": [
+		"der",
+		"die",
+		"das",
+		"den",
+		"dem",
+		"bitte",
+		"mal",
+		"stell",
+		"stelle",
+		"setze",
+		"mach",
+		"mache",
+		"schalte"
+	],
+	"commands": {
+		"recenter": [
+			"zentrieren",
+			"neu zentrieren",
+			"bildschirm zentrieren"
+		],
+		"show menu": [
+			"menü zeigen",
+			"menü anzeigen",
+			"menü öffnen"
+		],
+		"hide menu": [
+			"menü ausblenden",
+			"menü schließen",
+			"menü verstecken"
+		],
+		"menu": [
+			"menü"
+		],
+		"show keyboard": [
+			"tastatur zeigen",
+			"tastatur anzeigen",
+			"tastatur öffnen"
+		],
+		"hide keyboard": [
+			"tastatur ausblenden",
+			"tastatur schließen",
+			"tastatur verstecken"
+		],
+		"keyboard": [
+			"tastatur"
+		],
+		"head lock on": [
+			"kopf fixierung ein",
+			"kopf fixierung an",
+			"kopffixierung ein",
+			"kopffixierung an"
+		],
+		"head lock off": [
+			"kopf fixierung aus",
+			"kopffixierung aus"
+		],
+		"volume up": [
+			"lauter",
+			"lautstärke hoch",
+			"lautstärke erhöhen"
+		],
+		"volume down": [
+			"leiser",
+			"lautstärke runter",
+			"lautstärke verringern"
+		],
+		"volume #": [
+			"lautstärke #"
+		],
+		"mute": [
+			"stumm",
+			"stummschalten",
+			"ton aus"
+		],
+		"unmute": [
+			"stummschaltung aufheben",
+			"ton an",
+			"ton ein"
+		],
+		"curve #": [
+			"krümmung #"
+		],
+		"flat screen": [
+			"flacher bildschirm",
+			"flach",
+			"keine krümmung"
+		],
+		"passthrough fade #": [
+			"passthrough abdunkeln #",
+			"raum abdunkeln #"
+		],
+		"glow strength #": [
+			"leuchtstärke #"
+		],
+		"glow size #": [
+			"leuchtgröße #"
+		],
+		"separation #": [
+			"trennung #"
+		],
+		"convergence #": [
+			"konvergenz #"
+		],
+		"select all": [
+			"alles auswählen",
+			"alles markieren"
+		],
+		"copy": [
+			"kopieren"
+		],
+		"paste": [
+			"einfügen"
+		],
+		"cut": [
+			"ausschneiden"
+		],
+		"undo": [
+			"rückgängig"
+		],
+		"redo": [
+			"wiederholen",
+			"wiederherstellen"
+		],
+		"save": [
+			"speichern"
+		],
+		"find": [
+			"suchen"
+		],
+		"new tab": [
+			"neuer tab"
+		],
+		"close tab": [
+			"tab schließen"
+		],
+		"close window": [
+			"fenster schließen"
+		],
+		"switch window": [
+			"fenster wechseln"
+		],
+		"show desktop": [
+			"desktop anzeigen",
+			"desktop zeigen"
+		],
+		"task manager": [
+			"task manager"
+		],
+		"start menu": [
+			"startmenü",
+			"windows taste"
+		],
+		"screenshot": [
+			"screenshot",
+			"bildschirmfoto"
+		],
+		"escape": [
+			"escape"
+		],
+		"enter": [
+			"eingabe",
+			"enter",
+			"eingabetaste"
+		],
+		"tab key": [
+			"tabulator",
+			"tab taste"
+		],
+		"backspace": [
+			"rücktaste",
+			"backspace"
+		],
+		"delete": [
+			"entfernen",
+			"löschtaste"
+		],
+		"page up": [
+			"bild auf",
+			"seite hoch"
+		],
+		"page down": [
+			"bild ab",
+			"seite runter"
+		]
+	},
+	"typing": {
+		"clear": [
+			"löschen",
+			"lösche"
+		],
+		"submit": [
+			"senden",
+			"absenden"
+		],
+		"new line": [
+			"neue zeile"
+		],
+		"new paragraph": [
+			"neuer absatz"
+		],
+		"open parenthesis": [
+			"klammer auf"
+		],
+		"close parenthesis": [
+			"klammer zu"
+		]
+	},
+	"help": [
+		"Sag den Namen einer Schaltfläche und was sie sein soll: so geht jede Schaltfläche im Menü",
+		"Der nächste Wert der Schaltfläche",
+		"Eine Schaltfläche ohne Auswahl: nur ihr Name"
+	],
+	"list": {
+		"commands": "Befehle",
+		"menu": "Jede Schaltfläche im Menü",
+		"typing": "Beim Diktieren",
+		"note": "Halte deine Sprachtaste und sag einen Befehl für sich allein.",
+		"note_prefix": "Beginne jeden Befehl mit „Nightfall“.",
+		"note_off": "Sprachbefehle sind aus: alles, was du sagst, wird getippt."
+	}
+}

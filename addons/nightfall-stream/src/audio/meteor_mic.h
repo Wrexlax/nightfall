@@ -36,6 +36,14 @@ public:
     std::string start(const std::string &host, int port, const std::string &meteor_key, bool opus);
     void stop();
 
+    // Steam Frame: Meteor's address on the headset's second link ("" for
+    // none). Every frame then goes there as well, the same datagram; Meteor
+    // knows the session by the key each one carries and plays each frame
+    // once, so the microphone keeps working while either link holds. Only
+    // while started, and forgotten by stop(). Returns an empty string, or
+    // why the second link couldn't be used.
+    std::string set_second(const std::string &host);
+
     bool is_running() const { return running_.load(); }
     // Muted frames are sent as silence with the muted flag, so Meteor's
     // device stays live and unmuting has no restart delay.
@@ -66,6 +74,12 @@ private:
     MeteorCipher cipher_;
     OpusEncoder *encoder_ = nullptr;
     int socket_ = -1;
+    // The second link's socket, read by the sending thread; -1 for none. One
+    // that has been replaced is closed at the next change or at stop(), by
+    // which time the sending thread is done with it.
+    std::atomic<int> second_socket_{-1};
+    int retired_socket_ = -1;
+    int port_ = 0;
     void *stream_ = nullptr; // AAudioStream on Android
 };
 

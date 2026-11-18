@@ -1,0 +1,233 @@
+{
+	"whisper": "fi",
+	"on": [
+		"päällä",
+		"päälle",
+		"käyttöön"
+	],
+	"off": [
+		"pois",
+		"pois päältä",
+		"pois käytöstä"
+	],
+	"next": [
+		"seuraava",
+		"vaihda"
+	],
+	"enable": [
+		"ota käyttöön",
+		"aktivoi"
+	],
+	"disable": [
+		"poista käytöstä"
+	],
+	"minus": [
+		"miinus"
+	],
+	"plus": [
+		"plus"
+	],
+	"to": [
+		"arvoon"
+	],
+	"drop": [
+		"kiitos",
+		"ole hyvä",
+		"aseta"
+	],
+	"commands": {
+		"recenter": [
+			"keskitä",
+			"keskitä näyttö"
+		],
+		"show menu": [
+			"näytä valikko",
+			"avaa valikko"
+		],
+		"hide menu": [
+			"piilota valikko",
+			"sulje valikko"
+		],
+		"menu": [
+			"valikko"
+		],
+		"show keyboard": [
+			"näytä näppäimistö",
+			"avaa näppäimistö"
+		],
+		"hide keyboard": [
+			"piilota näppäimistö",
+			"sulje näppäimistö"
+		],
+		"keyboard": [
+			"näppäimistö"
+		],
+		"head lock on": [
+			"päälukitus päälle",
+			"päälukitus päällä",
+			"lukitse pää"
+		],
+		"head lock off": [
+			"päälukitus pois",
+			"vapauta pää"
+		],
+		"volume up": [
+			"kovemmalle",
+			"ääntä lisää",
+			"äänenvoimakkuus ylös"
+		],
+		"volume down": [
+			"hiljemmalle",
+			"ääntä pienemmälle",
+			"äänenvoimakkuus alas"
+		],
+		"volume #": [
+			"äänenvoimakkuus #"
+		],
+		"mute": [
+			"mykistä",
+			"ääni pois",
+			"hiljaa"
+		],
+		"unmute": [
+			"poista mykistys",
+			"ääni päälle"
+		],
+		"curve #": [
+			"kaarevuus #"
+		],
+		"flat screen": [
+			"tasainen näyttö",
+			"tasainen",
+			"ei kaarevuutta"
+		],
+		"passthrough fade #": [
+			"himmennä huone #",
+			"läpinäkyvyyden himmennys #"
+		],
+		"glow strength #": [
+			"hehkun voimakkuus #"
+		],
+		"glow size #": [
+			"hehkun koko #"
+		],
+		"separation #": [
+			"erottelu #"
+		],
+		"convergence #": [
+			"konvergenssi #"
+		],
+		"select all": [
+			"valitse kaikki"
+		],
+		"copy": [
+			"kopioi"
+		],
+		"paste": [
+			"liitä"
+		],
+		"cut": [
+			"leikkaa"
+		],
+		"undo": [
+			"kumoa"
+		],
+		"redo": [
+			"tee uudelleen",
+			"toista"
+		],
+		"save": [
+			"tallenna"
+		],
+		"find": [
+			"etsi",
+			"hae"
+		],
+		"new tab": [
+			"uusi välilehti"
+		],
+		"close tab": [
+			"sulje välilehti"
+		],
+		"close window": [
+			"sulje ikkuna"
+		],
+		"switch window": [
+			"vaihda ikkuna",
+			"vaihda ikkunaa"
+		],
+		"show desktop": [
+			"näytä työpöytä"
+		],
+		"task manager": [
+			"tehtävienhallinta"
+		],
+		"start menu": [
+			"käynnistä valikko",
+			"aloitusvalikko",
+			"windows näppäin"
+		],
+		"screenshot": [
+			"kuvakaappaus",
+			"näyttökuva"
+		],
+		"escape": [
+			"escape"
+		],
+		"enter": [
+			"enter"
+		],
+		"tab key": [
+			"sarkain"
+		],
+		"backspace": [
+			"askelpalautin"
+		],
+		"delete": [
+			"delete",
+			"poista"
+		],
+		"page up": [
+			"sivu ylös"
+		],
+		"page down": [
+			"sivu alas"
+		]
+	},
+	"typing": {
+		"clear": [
+			"tyhjennä",
+			"pyyhi"
+		],
+		"submit": [
+			"lähetä"
+		],
+		"new line": [
+			"uusi rivi"
+		],
+		"new paragraph": [
+			"uusi kappale"
+		],
+		"open parenthesis": [
+			"sulku auki",
+			"avaa sulku"
+		],
+		"close parenthesis": [
+			"sulku kiinni",
+			"sulje sulku"
+		]
+	},
+	"help": [
+		"Sano painikkeen nimi ja mitä sen pitää olla: näin toimii jokainen valikon painike",
+		"Painikkeen seuraava arvo",
+		"Painike, jossa ei ole valittavaa: pelkkä nimi"
+	],
+	"list": {
+		"commands": "Komennot",
+		"menu": "Mikä tahansa valikon painike",
+		"typing": "Sanelun aikana",
+		"note": "Pidä äänipainiketta pohjassa ja sano komento yksinään.",
+		"note_prefix": "Aloita jokainen komento sanalla ”Nightfall”.",
+		"note_off": "Äänikomennot ovat pois päältä: kaikki sanomasi kirjoitetaan."
+	}
+}

@@ -27,6 +27,9 @@ pub struct Features {
     /// True when the SunshineVDD virtual display driver is installed and the
     /// bundled host supports virtual displays.
     pub vdd_installed: bool,
+    /// Whether an address has a stream running through Meteor
+    /// (`Stats::is_streaming`): who may ask for a media key to be pressed.
+    pub streaming: Option<Arc<dyn Fn(std::net::IpAddr) -> bool + Send + Sync>>,
 }
 
 /// Bumped when the client has to change how it talks to Meteor.
@@ -46,7 +49,37 @@ pub fn info(map: &PortMap, features: &Features) -> serde_json::Value {
         "mode": "proxy",
         "sunshine": sunshine,
         "ports": ports,
+        // Fixes from the Steam Frame port that a client can't tell from the
+        // version number (upstream's own 0.9.0 doesn't have them). Clients
+        // that don't know the key ignore it.
+        // "second-link": video and audio pings over a client's second
+        // network path make Meteor send copies there too (proxy.rs).
+        // "second-link-only": a second-link ping's extra byte can ask for
+        // that link alone.
+        // "link-sync": the "link" entry below, and second-link pings that
+        // carry the headset's choice and the pick number it has seen.
+        // "side-both": the microphone and depth connections are taken from
+        // a streaming client's second address as that client's.
+        // "control-both": control datagrams are taken from either of a
+        // client's two addresses as one peer and answered over both.
+        // "depth-live": the answer at /meteor/link also says whether depth is
+        // offered at this moment, so a headset can follow "Host depth" being
+        // switched off and on during a stream.
+        // "link-hold": a second-link ping may say 3, "the second link first,
+        // but both links for now", from a headset that watches that link.
+        // "media-keys" (added below, where it is true): /meteor/media
+        // presses a volume or playback key on this PC for a streaming client.
+        "fixes": ["quiet-flows", "mic-stereo", "second-link", "second-link-only", "link-sync", "link-hold", "control-both", "side-both", "depth-live"],
+        // The Stream Link choice last picked (0 both links, 1 the adapter
+        // first, 2 Wi-Fi only) and the number of the last pick made in the
+        // tray menu; see proxy.rs, LINK_WANTED.
+        "link": link_pick(),
     });
+    if crate::media_keys::SUPPORTED {
+        if let Some(fixes) = info["fixes"].as_array_mut() {
+            fixes.push(json!("media-keys"));
+        }
+    }
     // Optional features; older clients ignore keys they don't know. Both
     // side channels are encrypted for Meteor's key.
     if let Some(key) = &features.key {
@@ -73,7 +106,7 @@ pub fn info(map: &PortMap, features: &Features) -> serde_json::Value {
     }
     // Only while a model is loaded and host depth is switched on in the tray.
     if let Some((port, depth)) = &features.depth
-        && depth.enabled()
+        && depth_offered(features)
         && let Some((model, width, height)) = depth.active_model()
     {
         info["depth"] = json!({
@@ -90,6 +123,24 @@ pub fn info(map: &PortMap, features: &Features) -> serde_json::Value {
     info
 }
 
+/// Whether depth is on offer at this moment: switched on in the tray, with a
+/// model loaded.
+fn depth_offered(features: &Features) -> bool {
+    features.depth.as_ref().is_some_and(|(_, depth)| depth.enabled() && depth.active_model().is_some())
+}
+
+/// The Stream Link choice and the number of the last pick in the tray menu.
+fn link_pick() -> serde_json::Value {
+    json!({
+        "choice": crate::proxy::LINK_WANTED.load(std::sync::atomic::Ordering::Relaxed),
+        "rev": crate::proxy::LINK_REV.load(std::sync::atomic::Ordering::Relaxed),
+    })
+}
+
+/// Where a streaming headset looks every couple of seconds for a pick made
+/// in the tray menu. Answered like any probe, but kept out of the log.
+const LINK_PATH: &str = "/meteor/link";
+
 pub async fn bind(port: u16) -> io::Result<TcpListener> {
     match crate::net::tcp_listener(port).await {
         Ok(listener) => Ok(listener),
@@ -105,6 +156,7 @@ pub async fn serve(listener: TcpListener, map: PortMap, features: Features) {
         let features = features.clone();
         tokio::spawn(async move {
             match tokio::time::timeout(std::time::Duration::from_secs(5),respond(stream, &body, &features)).await {
+                Ok(Ok(path)) if path == LINK_PATH => {}
                 Ok(Ok(path)) => log::info!("Discovery probe from {peer} ({path})"),
                 Ok(Err(err)) => log::debug!("Discovery probe from {peer} failed: {err}"),
                 Err(_) => log::debug!("Discovery probe from {peer} timed out"),
@@ -164,6 +216,40 @@ async fn respond(mut stream: TcpStream, body: &str, _features: &Features) -> io:
             return Ok(path);
         }
     }
+    if let Some(key) = crate::media_keys::name_in(&path) {
+        if method != "POST" {
+            write_json(&mut stream, 405, &json!({"error": "POST only"}).to_string()).await?;
+            return Ok(path);
+        }
+        let peer = stream.peer_addr()?.ip();
+        let streaming = _features.streaming.as_ref().is_some_and(|streaming| (**streaming)(peer));
+        let (status, mut value) = media_key_answer(key, streaming, crate::media_keys::press);
+        if status != 200 {
+            log::info!("Media key request from {peer} refused: {}", value["error"]);
+        } else {
+            // Windows acts on the key a moment after it is pressed: wait for
+            // that before saying whether the PC is muted now.
+            tokio::time::sleep(std::time::Duration::from_millis(80)).await;
+            if let Some(muted) = muted_now().await {
+                value["muted"] = json!(muted);
+            }
+        }
+        write_json(&mut stream, status, &value.to_string()).await?;
+        // Answered like the link page: a press is not a line in the log.
+        return Ok(LINK_PATH.to_string());
+    }
+    if path == LINK_PATH && method == "GET" {
+        let mut page = json!({"service": "nightfall-meteor", "link": link_pick(), "depth": depth_offered(_features)});
+        // Only a streaming headset shows a Mute key, so only it is told.
+        let peer = stream.peer_addr()?.ip();
+        if _features.streaming.as_ref().is_some_and(|streaming| (**streaming)(peer))
+            && let Some(muted) = muted_now().await
+        {
+            page["muted"] = json!(muted);
+        }
+        write_json(&mut stream, 200, &page.to_string()).await?;
+        return Ok(path);
+    }
     let response = if method == "GET" && (path == "/meteor" || path.starts_with("/meteor?")) {
         format!(
             "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
@@ -175,6 +261,27 @@ async fn respond(mut stream: TcpStream, body: &str, _features: &Features) -> io:
     stream.write_all(response.as_bytes()).await?;
     stream.shutdown().await?;
     Ok(path)
+}
+
+/// Whether the PC's sound is muted, asked off the async threads (the
+/// question sets COM up and takes it down again).
+async fn muted_now() -> Option<bool> {
+    tokio::task::spawn_blocking(crate::media_keys::muted).await.ok().flatten()
+}
+
+/// The answer to a media key request: only a client with a stream running
+/// through Meteor may ask, and only for a key `media_keys` knows.
+fn media_key_answer(key: &str, streaming: bool, press: fn(&str) -> Result<(), &'static str>) -> (u16, serde_json::Value) {
+    if !streaming {
+        return (403, json!({"error": "not a streaming client"}));
+    }
+    if crate::media_keys::code(key).is_none() {
+        return (400, json!({"error": "not a media key"}));
+    }
+    match press(key) {
+        Ok(()) => (200, json!({"pressed": key})),
+        Err(why) => (501, json!({"error": why})),
+    }
 }
 
 fn virtual_body_length(headers: &str) -> io::Result<usize> {
@@ -443,6 +550,24 @@ async fn write_json(stream: &mut TcpStream, status: u16, body: &str) -> io::Resu
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_media_key_is_pressed_only_for_a_streaming_client_and_only_if_known() {
+        fn pressed(_key: &str) -> Result<(), &'static str> { Ok(()) }
+        fn cannot(_key: &str) -> Result<(), &'static str> { Err("media keys are only pressed on Windows") }
+        assert_eq!(media_key_answer("mute", false, pressed).0, 403, "nobody else on the network may press keys");
+        assert_eq!(media_key_answer("delete", true, pressed).0, 400);
+        assert_eq!(media_key_answer("", true, pressed).0, 400);
+        assert_eq!(media_key_answer("mute", true, pressed), (200, json!({"pressed": "mute"})));
+        assert_eq!(media_key_answer("mute", true, cannot).0, 501);
+    }
+
+    #[test]
+    fn discovery_says_media_keys_only_where_they_can_be_pressed() {
+        let info = info(&PortMap::new(47989, 1000).unwrap(), &Features::default());
+        let says = info["fixes"].as_array().unwrap().iter().any(|fix| fix == "media-keys");
+        assert_eq!(says, crate::media_keys::SUPPORTED);
+    }
     #[test]
     fn xr_discovery_is_absent_until_service_supplies_a_port() {
         let map = PortMap::new(47989, 1000).unwrap();

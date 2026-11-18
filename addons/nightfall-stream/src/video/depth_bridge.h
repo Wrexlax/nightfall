@@ -50,6 +50,18 @@ public:
     String get_device_model();
     String export_diagnostics();
 
+    // On-headset depth fed from the video decoder (Steam Frame,
+    // frame_depth_engine.h). In every other build these do nothing and
+    // has_decoder_depth() says no.
+    bool has_decoder_depth() const;
+    // Whether one of the headset's own models can be used: its engine is in
+    // this build and its file is in the models folder.
+    bool decoder_depth_model_present(int model_index);
+    void set_decoder_depth_enabled(bool enabled);
+    void set_decoder_depth_region(float x, float y, float width, float height);
+    void set_decoder_depth_threads(int threads);
+    String take_decoder_depth_report();
+
 protected:
     static void _bind_methods();
 

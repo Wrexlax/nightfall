@@ -541,6 +541,7 @@ func process(delta: float):
 	elif _gpu_boost_active:
 		_set_gpu_performance_hint(false)
 	if not enabled or not main.primary_media_active():
+		_set_decoder_depth(false)
 		return
 	var capture_source = main.primary_capture_source()
 
@@ -560,7 +561,22 @@ func process(delta: float):
 			upsample_viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
 			offset_viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
 
-	if not _meteor_in_use and main.stream_backend.has_method("submit_depth_frame"):
+	# Steam Frame: the on-headset model takes its pictures from the video
+	# decoder itself (frame_depth_engine.h), so nothing is captured or handed
+	# over here; this only says when it is wanted and which part of the frame
+	# is the primary screen's. A Frame build without that engine has nothing
+	# to feed: a session without Meteor used to read the picture back from the
+	# GPU some 40 times a second (2-6 ms each) for a model that wasn't there.
+	var decoder_depth: bool = main.settings_controller.frame_depth_available()
+	# Meteor's depth comes first when it is the choice: the headset's own
+	# model only starts once Meteor has had a moment to deliver and hasn't
+	# (not running on the PC, or it stopped), so a Meteor session doesn't load
+	# a model it will never use.
+	var meteor_awaited: bool = decoder_depth and not _meteor_in_use and main.settings_controller.meteor_depth_selected()
+	_meteor_wait = _meteor_wait + delta if meteor_awaited else 0.0
+	_set_decoder_depth(decoder_depth and not _meteor_in_use and not (meteor_awaited and _meteor_wait < METEOR_WAIT_SEC))
+	var on_device_possible: bool = main.get("device_is_steam_frame") != true or decoder_depth
+	if not _meteor_in_use and on_device_possible and not decoder_depth and main.stream_backend.has_method("submit_depth_frame"):
 		var native_capture_available: bool = (
 			_platform == "Android"
 			and capture_source.has_method("supports_native_depth_capture")
@@ -650,11 +666,12 @@ func process(delta: float):
 		var mbit := float(meteor.bytes_received - _meteor_perf_bytes) * 8.0 / 1000000.0 / _perf_window
 		var m := _meteor_match
 		var frames := maxi(int(m["frames"]), 1)
-		main._log("[METEOR-DEPTH] %s shown=%.1f/s received=%.1f/s %.1fMbit/s host=%.2fms presented=%d newest=%d exact=%.0f%% lag1=%d lag2=%d lag3+=%d none=%d sync=%s" % [
+		main._log("[METEOR-DEPTH] %s shown=%.1f/s received=%.1f/s %.1fMbit/s host=%.2fms presented=%d newest=%d exact=%.0f%% lag1=%d lag2=%d lag3+=%d none=%d sync=%s%s" % [
 			"in use" if _meteor_in_use else "not delivering", float(_perf_updates) / _perf_window,
 			float(received) / _perf_window, mbit, meteor.host_latency_ms, _meteor_last_presented,
 			meteor.newest_frame, 100.0 * m["exact"] / frames, m["lag1"], m["lag2"], m["lag_more"], m["none"],
-			("%d frame%s" % [_meteor_sync_delay, "" if _meteor_sync_delay == 1 else "s"]) if main.settings.host.ai_3d_depth_sync else "off"])
+			("%d frame%s" % [_meteor_sync_delay, "" if _meteor_sync_delay == 1 else "s"]) if main.settings.host.ai_3d_depth_sync else "off",
+			_meteor_links_text()])
 		meteor_stats = {} if not _meteor_in_use else {
 			"shown_hz": float(_perf_updates) / _perf_window,
 			"received_hz": float(received) / _perf_window,
@@ -669,7 +686,21 @@ func process(delta: float):
 		_meteor_perf_bytes = meteor.bytes_received
 		for key in m:
 			m[key] = 0
-	if _perf_window >= 1.0 and _meteor_in_use:
+	if _perf_window >= 1.0 and (_meteor_in_use or not on_device_possible):
+		# Nothing to report for on-headset depth (the Steam Frame has none).
+		_perf_window = 0.0
+		_perf_updates = 0
+	elif _perf_window >= 1.0 and decoder_depth:
+		main._log("[DEPTH-PERF] on headset: %s | shown %.1f/s, %dx%d" % [
+			main.stream_backend.take_decoder_depth_report(), float(_perf_updates) / _perf_window, model_width, model_height])
+		# A model that would not start: say so once, on screen and in the log.
+		var status: String = main.stream_backend.get_depth_backend_status()
+		if status != _decoder_depth_status:
+			_decoder_depth_status = status
+			if not status.is_empty():
+				main._log("[DEPTH] %s" % status)
+				if main.comp:
+					main.comp.show_notice(status, 6.0)
 		_perf_window = 0.0
 		_perf_updates = 0
 	elif _perf_window >= 1.0:
@@ -690,12 +721,90 @@ func process(delta: float):
 		_perf_submitted = 0
 		_perf_updates = 0
 
+const METEOR_WAIT_SEC := 3.0
+var _meteor_wait := 0.0
+var _decoder_depth_on := false
+var _decoder_depth_status := ""
+var _decoder_depth_region := Vector4(-1.0, -1.0, -1.0, -1.0)
+
+# Steam Frame: tells the native engine whether to make depth from the decoded
+# video, and for which part of the frame (with several screens the frame holds
+# all of them; AI 3D is the primary's).
+## Whether the headset's own model is being fed (Steam Frame).
+func decoder_depth_on() -> bool:
+	return _decoder_depth_on
+
+func _set_decoder_depth(on: bool) -> void:
+	if on:
+		var region: Vector4 = main.primary_screen.uv_region if main.primary_screen else Vector4(0.0, 0.0, 1.0, 1.0)
+		if region != _decoder_depth_region:
+			_decoder_depth_region = region
+			main.stream_backend.set_decoder_depth_region(region)
+	if on == _decoder_depth_on:
+		return
+	_decoder_depth_on = on
+	if main.stream_backend:
+		main.stream_backend.set_decoder_depth_enabled(on)
+	main._log("[DEPTH] on-headset depth from the decoder: %s" % ("on" if on else "off"))
+	_refresh_ai3d_note()
+
+## Steam Frame: Meteor is the chosen depth and the headset's own model is
+## running in its place, because Meteor's maps aren't arriving.
+func headset_filling_in() -> bool:
+	return _decoder_depth_on and not _meteor_in_use and main.settings_controller.meteor_depth_selected()
+
+# The AI 3D page says so; it is told when that changes.
+func _refresh_ai3d_note() -> void:
+	var ui = main.get("ui_controller")
+	if ui != null and ui.has_method("refresh_ai3d_note"):
+		ui.refresh_ai3d_note()
+
+# Steam Frame: with a second connection, over which link the maps of the last
+# second came first.
+var _meteor_link_maps: Array[int] = [0, 0]
+
+func _meteor_links_text() -> String:
+	if meteor.second().is_empty():
+		_meteor_link_maps = meteor.maps_by_link.duplicate()
+		return ""
+	var first: int = meteor.maps_by_link[0] - _meteor_link_maps[0]
+	var second: int = meteor.maps_by_link[1] - _meteor_link_maps[1]
+	_meteor_link_maps = meteor.maps_by_link.duplicate()
+	return " first-over: own link %d, second link %d" % [maxi(first, 0), maxi(second, 0)]
+
 # Runs every frame: connects to Meteor's depth port while Meteor depth is
 # selected and AI 3D is on during a stream, and applies each new map.
+# Meteor's depth decoder on the PC can only start at a keyframe, and the host
+# sends one only when asked. Connected to Meteor with no map arriving, this
+# long after the last one (or after connecting): ask the host for a keyframe.
+# Three asks, spaced out, because each costs the stream a large frame; a
+# Meteor that still sends nothing has some other trouble.
+const METEOR_KEYFRAME_ASK_SEC: Array[float] = [2.0, 8.0, 30.0]
+var _meteor_keyframe_asks := 0
+
+static func keyframe_ask_due(silent: float, asks: int) -> bool:
+	return asks < METEOR_KEYFRAME_ASK_SEC.size() and silent >= METEOR_KEYFRAME_ASK_SEC[asks]
+
+func _ask_keyframe_if_silent() -> void:
+	var silent := meteor.silent_for()
+	if silent < MeteorDepthReceiver.STALL_SEC:
+		if meteor.maps_flowing():
+			_meteor_keyframe_asks = 0
+		return
+	if not keyframe_ask_due(silent, _meteor_keyframe_asks):
+		return
+	_meteor_keyframe_asks += 1
+	var asked: bool = main.stream_backend.request_keyframe() if main.stream_backend.has_method("request_keyframe") else false
+	main._log("[METEOR] %s Host depth is connected but no map has come for %.0f s: %s (%d of %d)" % [
+		Time.get_time_string_from_system(), silent,
+		"asked the PC for a keyframe, which Meteor's decoder needs to start" if asked else "a keyframe couldn't be asked for",
+		_meteor_keyframe_asks, METEOR_KEYFRAME_ASK_SEC.size()])
+
 func _update_meteor() -> void:
 	var wanted: bool = enabled and main.is_streaming and depth_texture != null \
 		and main.settings_controller.meteor_depth_selected()
 	if not wanted:
+		_meteor_keyframe_asks = 0
 		meteor_stats = {}
 		if meteor.is_active():
 			meteor.stop()
@@ -707,9 +816,17 @@ func _update_meteor() -> void:
 	if not meteor.is_active():
 		var info: Dictionary = main.stream_manager.meteor_depth_info()
 		meteor.start(main.stream_manager.meteor_address(), int(info["port"]), String(info["key"]))
+		_meteor_keyframe_asks = 0
 		main._log("[METEOR] Connecting to host depth on %s:%d" % [meteor.host, meteor.port])
+	# Steam Frame: a second connection over the headset's second link, while
+	# there is one and Stream Link isn't "Wi-Fi only".
+	var second: String = main.side_channel_second_address() if main.has_method("side_channel_second_address") else ""
+	if second != meteor.second():
+		meteor.set_second(second)
+		main._log("[METEOR] Host depth %s" % ("over the second link as well" if not second.is_empty() else "over the stream's own link only"))
 	_match_meteor_map()
 	_set_meteor_in_use(meteor.is_delivering())
+	_ask_keyframe_if_silent()
 
 # Shows the map made from the frame on screen. With Depth Sync, the renderer
 # shows the frame _meteor_sync_delay frames behind the newest decoded one, so
@@ -766,6 +883,11 @@ func _apply_meteor_map(entry: Dictionary) -> void:
 	var image := Image.create_from_data(model_width, model_height, false, Image.FORMAT_L8, entry["map"])
 	# Meteor and corrected native inference both return upright, top-row-first
 	# maps. Match the native GLES texture convention at the upload boundary.
+	# (Steam Frame port, on 0.8.1: flipped here on the Frame too, which put its
+	# Depth View upright - but only because that view flipped its own read; the
+	# 3D warp then used an upside-down map. Upstream 0.9 fixed the root cause in
+	# the shaders (depth_bottom_first), so the Frame no longer flips: its map
+	# stays top-row-first and every shader reads it as it is.)
 	depth_bottom_first = _native_capture_supported()
 	if depth_bottom_first:
 		image.flip_y()
@@ -778,6 +900,7 @@ func _set_meteor_in_use(value: bool) -> void:
 	if value == _meteor_in_use:
 		return
 	_meteor_in_use = value
+	_refresh_ai3d_note()
 	if value:
 		main._log("[METEOR] Using host depth from Meteor; on-device depth paused")
 	else:

@@ -31720,6 +31720,34 @@ static ma_pa_stream* ma_device__pa_stream_new__pulse(ma_device* pDevice, const c
     }
     ma_atomic_uint32_fetch_add(&g_StreamCounter, 1);
 
+#if !defined(MA_NO_RUNTIME_LINKING)
+    /* Nightfall (Steam Frame): give the stream a PipeWire node.name containing
+       "virtual" and "sink". SteamOS's WirePlumber otherwise reroutes every
+       output stream through Valve's spatializer filter chain (+~30 ms; Moonlight
+       XR found the same and bypasses it this way - see its docs/dev/reports/audio.md). */
+    if (pStreamName != NULL && strstr(pStreamName, "virtual sink") != NULL && pDevice->pContext->pulse.pulseSO != NULL) {
+        typedef void* (*nf_proplist_new_proc)(void);
+        typedef int   (*nf_proplist_sets_proc)(void*, const char*, const char*);
+        typedef void  (*nf_proplist_free_proc)(void*);
+        typedef ma_pa_stream* (*nf_stream_new_pl_proc)(ma_pa_context*, const char*, const ma_pa_sample_spec*, const ma_pa_channel_map*, void*);
+        nf_proplist_new_proc  pl_new  = (nf_proplist_new_proc) ma_dlsym(ma_context_get_log(pDevice->pContext), pDevice->pContext->pulse.pulseSO, "pa_proplist_new");
+        nf_proplist_sets_proc pl_sets = (nf_proplist_sets_proc)ma_dlsym(ma_context_get_log(pDevice->pContext), pDevice->pContext->pulse.pulseSO, "pa_proplist_sets");
+        nf_proplist_free_proc pl_free = (nf_proplist_free_proc)ma_dlsym(ma_context_get_log(pDevice->pContext), pDevice->pContext->pulse.pulseSO, "pa_proplist_free");
+        nf_stream_new_pl_proc st_new  = (nf_stream_new_pl_proc)ma_dlsym(ma_context_get_log(pDevice->pContext), pDevice->pContext->pulse.pulseSO, "pa_stream_new_with_proplist");
+        if (pl_new && pl_sets && pl_free && st_new) {
+            void* props = pl_new();
+            ma_pa_stream* pStream;
+            pl_sets(props, "node.name", actualStreamName);
+            pl_sets(props, "media.role", "game");
+            pStream = st_new((ma_pa_context*)pDevice->pulse.pPulseContext, actualStreamName, ss, cmap, props);
+            pl_free(props);
+            if (pStream != NULL) {
+                return pStream;
+            }
+        }
+    }
+#endif
+
     return ((ma_pa_stream_new_proc)pDevice->pContext->pulse.pa_stream_new)((ma_pa_context*)pDevice->pulse.pPulseContext, actualStreamName, ss, cmap);
 }
 

@@ -9,7 +9,8 @@ uniform bool reactive = false;
 uniform vec4 static_color : source_color = vec4(1.0);
 uniform float intensity : hint_range(0.0, 1.0) = 0.35;
 
-const float LAYER_SCALE = 1.30;
+// How far the halo reaches past the screen (expanded size / screen size).
+uniform float layer_scale = 1.30;
 
 vec3 sample_edge_color(vec2 source_uv) {
 	// The source has already been reduced to 32x32. Four bilinear lookups
@@ -37,7 +38,7 @@ vec3 sample_edge_color(vec2 source_uv) {
 }
 
 void fragment() {
-	vec2 inner_half = vec2(0.5 / LAYER_SCALE);
+	vec2 inner_half = vec2(0.5 / layer_scale);
 	vec2 inner_min = vec2(0.5) - inner_half;
 	vec2 inner_size = inner_half * 2.0;
 	vec2 from_center = abs(UV - vec2(0.5));

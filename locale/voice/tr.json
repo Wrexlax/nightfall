@@ -1,0 +1,232 @@
+{
+	"whisper": "tr",
+	"on": [
+		"açık",
+		"aç"
+	],
+	"off": [
+		"kapalı",
+		"kapat"
+	],
+	"next": [
+		"sonraki",
+		"değiştir"
+	],
+	"enable": [
+		"etkinleştir"
+	],
+	"disable": [
+		"devre dışı bırak"
+	],
+	"minus": [
+		"eksi"
+	],
+	"plus": [
+		"artı"
+	],
+	"to": [],
+	"drop": [
+		"lütfen",
+		"ayarla",
+		"yap"
+	],
+	"commands": {
+		"recenter": [
+			"ortala",
+			"ekranı ortala",
+			"yeniden ortala"
+		],
+		"show menu": [
+			"menüyü göster",
+			"menüyü aç"
+		],
+		"hide menu": [
+			"menüyü gizle",
+			"menüyü kapat"
+		],
+		"menu": [
+			"menü"
+		],
+		"show keyboard": [
+			"klavyeyi göster",
+			"klavyeyi aç"
+		],
+		"hide keyboard": [
+			"klavyeyi gizle",
+			"klavyeyi kapat"
+		],
+		"keyboard": [
+			"klavye"
+		],
+		"head lock on": [
+			"baş kilidi açık",
+			"baş kilidini aç",
+			"başı kilitle"
+		],
+		"head lock off": [
+			"baş kilidi kapalı",
+			"baş kilidini kapat"
+		],
+		"volume up": [
+			"sesi aç",
+			"sesi yükselt",
+			"daha yüksek"
+		],
+		"volume down": [
+			"sesi kıs",
+			"sesi azalt",
+			"daha kısık"
+		],
+		"volume #": [
+			"ses düzeyi #",
+			"ses #"
+		],
+		"mute": [
+			"sessiz",
+			"sesi kapat",
+			"sessize al"
+		],
+		"unmute": [
+			"sesi geri aç",
+			"sessizden çıkar"
+		],
+		"curve #": [
+			"kavis #"
+		],
+		"flat screen": [
+			"düz ekran",
+			"düz",
+			"kavis yok"
+		],
+		"passthrough fade #": [
+			"passthrough karartma #",
+			"odayı karart #"
+		],
+		"glow strength #": [
+			"parıltı gücü #"
+		],
+		"glow size #": [
+			"parıltı boyutu #"
+		],
+		"separation #": [
+			"ayrım #"
+		],
+		"convergence #": [
+			"yakınsama #"
+		],
+		"select all": [
+			"tümünü seç",
+			"hepsini seç"
+		],
+		"copy": [
+			"kopyala"
+		],
+		"paste": [
+			"yapıştır"
+		],
+		"cut": [
+			"kes"
+		],
+		"undo": [
+			"geri al"
+		],
+		"redo": [
+			"yinele",
+			"ileri al"
+		],
+		"save": [
+			"kaydet"
+		],
+		"find": [
+			"bul",
+			"ara"
+		],
+		"new tab": [
+			"yeni sekme"
+		],
+		"close tab": [
+			"sekmeyi kapat"
+		],
+		"close window": [
+			"pencereyi kapat"
+		],
+		"switch window": [
+			"pencere değiştir",
+			"pencereyi değiştir"
+		],
+		"show desktop": [
+			"masaüstünü göster"
+		],
+		"task manager": [
+			"görev yöneticisi"
+		],
+		"start menu": [
+			"başlat menüsü",
+			"windows tuşu"
+		],
+		"screenshot": [
+			"ekran görüntüsü"
+		],
+		"escape": [
+			"escape",
+			"kaçış"
+		],
+		"enter": [
+			"enter",
+			"giriş"
+		],
+		"tab key": [
+			"sekme tuşu",
+			"tab tuşu"
+		],
+		"backspace": [
+			"geri tuşu",
+			"backspace"
+		],
+		"delete": [
+			"sil",
+			"delete"
+		],
+		"page up": [
+			"sayfa yukarı"
+		],
+		"page down": [
+			"sayfa aşağı"
+		]
+	},
+	"typing": {
+		"clear": [
+			"temizle"
+		],
+		"submit": [
+			"gönder"
+		],
+		"new line": [
+			"yeni satır"
+		],
+		"new paragraph": [
+			"yeni paragraf"
+		],
+		"open parenthesis": [
+			"parantez aç",
+			"aç parantez"
+		],
+		"close parenthesis": [
+			"parantez kapat",
+			"kapa parantez"
+		]
+	},
+	"help": [
+		"Bir düğmenin adını ve ne olması gerektiğini söyleyin: menüdeki her düğme böyle çalışır",
+		"Düğmenin sonraki değeri",
+		"Seçeneği olmayan bir düğme: yalnızca adı"
+	],
+	"list": {
+		"commands": "Komutlar",
+		"menu": "Menüdeki herhangi bir düğme",
+		"typing": "Dikte ederken",
+		"note": "Ses düğmenizi basılı tutun ve komutu tek başına söyleyin.",
+		"note_prefix": "Her komuta “Nightfall” diyerek başlayın.",
+		"note_off": "Sesli komutlar kapalı: söylediğiniz her şey yazılır."
+	}
+}

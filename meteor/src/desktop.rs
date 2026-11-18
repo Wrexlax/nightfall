@@ -35,7 +35,7 @@ pub fn set_autostart(on: bool) -> Result<(), String> {
         "[Desktop Entry]\n\
          Type=Application\n\
          Name=Nightfall Meteor\n\
-         Comment=Host depth and microphone for Nightfall on Meta Quest\n\
+         Comment=Host depth and microphone for Nightfall on your headset\n\
          Exec={}\n\
          Terminal=false\n\
          X-GNOME-Autostart-enabled=true\n\

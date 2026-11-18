@@ -96,6 +96,7 @@ func build_welcome_ui():
 	build_welcome_screen(screens)
 	build_server_screen(screens)
 	build_ip_screen(screens)
+	build_name_screen(screens)
 	build_pin_screen(screens)
 	build_language_picker(root)
 	build_notice(root)
@@ -141,6 +142,20 @@ func show_notice(text: String) -> void:
 
 func clear_notice() -> void:
 	show_notice("")
+
+## A notice about this moment only ("Already connecting to your PC..."): it
+## goes away by itself after `seconds`, unless another notice has taken its
+## place. Shown with show_notice() it stayed on the welcome screen behind the
+## stream and was still there after the next disconnect (8g, 2026-11-17).
+func show_passing_notice(text: String, seconds: float = 4.0) -> void:
+	show_notice(text)
+	await main.get_tree().create_timer(seconds).timeout
+	if notice_text() == text:
+		clear_notice()
+
+func notice_text() -> String:
+	var panel = main.welcome_viewport.get_node_or_null("WelcomeRoot/WelcomeNotice") if main.welcome_viewport else null
+	return panel.get_node("NoticeText").text if panel else ""
 
 func get_xr_control() -> RefCounted:
 	# Welcome and the in-stream DEV entry share one lease and one receiver.
@@ -310,7 +325,7 @@ func build_welcome_screen(parent: Node):
 	screen.add_child(subtitle)
 
 	var mid_spacer = Control.new()
-	mid_spacer.custom_minimum_size = Vector2(0, 0)
+	mid_spacer.custom_minimum_size = Vector2(0, 14)
 	mid_spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	screen.add_child(mid_spacer)
 
@@ -427,6 +442,12 @@ func build_welcome_screen(parent: Node):
 		elif btn_text == "Connect" and current_ip.is_empty():
 			show_welcome_screen("server")
 		else:
+			# Quick Start is already connecting: leave that launch alone
+			# (StreamManager.launch_in_flight() says why, and why here).
+			if main.stream_manager.launch_is_in_flight():
+				main._log("[STREAM] Connect pressed while a launch is in flight: left alone")
+				show_passing_notice("Already connecting to your PC...")
+				return
 			connect_btn.text = "Connecting..."
 			connect_btn.disabled = true
 			main.start_connect_timeout()
@@ -473,6 +494,20 @@ func build_server_screen(parent: Node):
 	heading.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	screen.add_child(heading)
 
+	# Pairing / connection feedback (Steam Frame build): shown under the heading
+	# so a click on a server always visibly does something.
+	var msg = Label.new()
+	msg.name = "ServerMessage"
+	msg.text = ""
+	msg.visible = false
+	msg.add_theme_font_size_override("font_size", 26)
+	msg.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	msg.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	msg.custom_minimum_size = Vector2(1100, 0)
+	msg.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	msg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	screen.add_child(msg)
+
 	var list_spacer = Control.new()
 	list_spacer.custom_minimum_size = Vector2(0, 40)
 	list_spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -491,6 +526,11 @@ func build_server_screen(parent: Node):
 	discover_list.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	discover_list.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	screen.add_child(discover_list)
+
+	var scan_spacer = Control.new()
+	scan_spacer.custom_minimum_size = Vector2(0, 12)
+	scan_spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	screen.add_child(scan_spacer)
 
 	var scan_btn = Button.new()
 	scan_btn.name = "ScanBtn"
@@ -514,20 +554,6 @@ func build_server_screen(parent: Node):
 	bottom_spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	screen.add_child(bottom_spacer)
 
-	var clear_btn = Button.new()
-	clear_btn.name = "ClearServersBtn"
-	clear_btn.custom_minimum_size = Vector2(400, 60)
-	clear_btn.add_theme_font_size_override("font_size", 24)
-	clear_btn.add_theme_color_override("font_color", Color(0.9, 0.5, 0.5, 1.0))
-	clear_btn.text = "Clear Saved Servers"
-	clear_btn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	screen.add_child(clear_btn)
-
-	var clear_spacer = Control.new()
-	clear_spacer.custom_minimum_size = Vector2(0, 16)
-	clear_spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	screen.add_child(clear_spacer)
-
 	var back_btn = Button.new()
 	back_btn.custom_minimum_size = Vector2(300, 60)
 	back_btn.add_theme_font_size_override("font_size", 28)
@@ -542,8 +568,44 @@ func build_server_screen(parent: Node):
 
 	add_btn.pressed.connect(func(): show_welcome_screen("ip"))
 	scan_btn.pressed.connect(func(): browse_mdns())
-	clear_btn.pressed.connect(func(): clear_saved_servers())
 	back_btn.pressed.connect(func(): show_welcome_screen("welcome"))
+
+## The longest address with a port: "255.255.255.255:65535".
+const IP_FIELD_MAX := 21
+
+## What is highlighted in a text field, as [from, to]; equal when nothing is.
+static func _highlighted(field: LineEdit) -> Array:
+	if field.has_selection():
+		return [field.get_selection_from_column(), field.get_selection_to_column()]
+	return [0, 0]
+
+static func _apply_edit(field: LineEdit, edit: Array) -> void:
+	field.deselect()
+	field.text = edit[0]
+	field.caret_column = edit[1]
+
+## A key pressed for a text field: it takes the place of what is highlighted,
+## or goes in at the caret. Returns [text, caret]; unchanged when the result
+## would be longer than max_length.
+static func typed(text: String, caret: int, highlighted: Array, key: String, max_length: int) -> Array:
+	var from: int = clampi(caret, 0, text.length())
+	var to: int = from
+	if highlighted[1] > highlighted[0]:
+		from = clampi(highlighted[0], 0, text.length())
+		to = clampi(highlighted[1], from, text.length())
+	if text.length() - (to - from) + key.length() > max_length:
+		return [text, clampi(caret, 0, text.length())]
+	return [text.substr(0, from) + key + text.substr(to), from + key.length()]
+
+## DEL for a text field: removes what is highlighted, or the character
+## before the caret. Returns [text, caret].
+static func deleted(text: String, caret: int, highlighted: Array) -> Array:
+	if highlighted[1] > highlighted[0]:
+		return typed(text, caret, highlighted, "", text.length())
+	var at: int = clampi(caret, 0, text.length())
+	if at == 0:
+		return [text, 0]
+	return [text.substr(0, at - 1) + text.substr(at), at - 1]
 
 func build_ip_screen(parent: Node):
 	var screen = VBoxContainer.new()
@@ -582,6 +644,9 @@ func build_ip_screen(parent: Node):
 	ip_input.add_theme_font_size_override("font_size", 36)
 	ip_input.placeholder_text = "e.g. 192.168.1.100"
 	ip_input.alignment = HORIZONTAL_ALIGNMENT_CENTER
+	# Pressing a key below takes the focus from the field; what is highlighted
+	# has to outlive that, so the key can replace it (8w).
+	ip_input.deselect_on_focus_loss_enabled = false
 	ip_center.add_child(ip_input)
 
 	var numpad_spacer = Control.new()
@@ -614,9 +679,10 @@ func build_ip_screen(parent: Node):
 		btn.add_theme_font_size_override("font_size", 36)
 		numpad.add_child(btn)
 		btn.pressed.connect(func():
-			var text = ip_input.text
-			if text.length() < 21:
-				ip_input.text = text + key
+			# At the caret, so a wrong digit in the middle can be corrected
+			# after pointing at it (keys used to go on the end regardless),
+			# and in place of whatever is highlighted, as typing does anywhere.
+			_apply_edit(ip_input, typed(ip_input.text, ip_input.caret_column, _highlighted(ip_input), key, IP_FIELD_MAX))
 		)
 
 	var btn_spacer = Control.new()
@@ -649,9 +715,7 @@ func build_ip_screen(parent: Node):
 	del_btn.text = "DEL"
 	action_row.add_child(del_btn)
 	del_btn.pressed.connect(func():
-		var text = ip_input.text
-		if text.length() > 0:
-			ip_input.text = text.substr(0, text.length() - 1)
+		_apply_edit(ip_input, deleted(ip_input.text, ip_input.caret_column, _highlighted(ip_input)))
 	)
 
 	var bottom_spacer = Control.new()
@@ -718,6 +782,25 @@ func build_pin_screen(parent: Node):
 	pin_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	screen.add_child(pin_label)
 
+	# Steam Frame port: what to do with the PIN, on the PC. The heading alone
+	# ("Enter PIN on Host") left a first-time user to find the place.
+	var help_spacer = Control.new()
+	help_spacer.custom_minimum_size = Vector2(0, 30)
+	help_spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	screen.add_child(help_spacer)
+
+	var help = Label.new()
+	help.name = "PINHelp"
+	help.text = PIN_HELP_HOST
+	help.add_theme_font_size_override("font_size", PIN_HELP_FONT)
+	help.add_theme_color_override("font_color", Color(0.78, 0.84, 0.92))
+	help.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	help.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	help.custom_minimum_size = Vector2(PIN_HELP_WIDTH, 0)
+	help.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	help.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	screen.add_child(help)
+
 	var bottom_spacer = Control.new()
 	bottom_spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	bottom_spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -777,6 +860,9 @@ func show_welcome_screen(name: String):
 			populate_server_list()
 		"ip":
 			root.get_node_or_null("IPScreen").visible = true
+		"name":
+			root.get_node_or_null("NameScreen").visible = true
+			_refresh_name_screen()
 		"pin":
 			var pin_screen = root.get_node_or_null("PINScreen")
 			if pin_screen:
@@ -795,8 +881,9 @@ func update_welcome_info():
 	var ws = screens.get_node_or_null("WelcomeScreen")
 	if not ws:
 		return
-	var host_label = ws.get_node_or_null("WelcomeHostName")
-	var ip_label = ws.get_node_or_null("WelcomeHostIP")
+	# These two sit inside their own box, not directly on the page.
+	var host_label = ws.find_child("WelcomeHostName", true, false)
+	var ip_label = ws.find_child("WelcomeHostIP", true, false)
 	var connect_btn = ws.get_node_or_null("WelcomeConnect")
 	var app_btn = ws.get_node_or_null("WelcomeAppBtn")
 	var change_btn = ws.get_node_or_null("WelcomeChangeServer")
@@ -811,14 +898,13 @@ func update_welcome_info():
 	var _hosts = _cm.get_hosts() if _cm else []
 	var has_hosts = _hosts.size() > 0
 
-	var host_name = main._last_hostname
-	if host_name.is_empty():
-		for h in _hosts:
-			if main.host_matches_address(h, saved_ip):
-				var hname = h.get("hostname", "")
-				if hname != saved_ip and not hname.is_empty():
-					host_name = hname
-				break
+	# The saved PC that Connect will use: its name over what the name leaves out.
+	var picked := SavedHosts.pick(_hosts, main.current_host_id, saved_ip)
+	var host_name := main._last_hostname as String
+	var host_detail: String = saved_ip
+	if host_name.is_empty() and not picked.is_empty():
+		host_name = SavedHosts.title(picked)
+		host_detail = SavedHosts.detail(picked)
 
 	if has_saved:
 		if connect_btn and connect_btn.text != "Connecting...":
@@ -826,7 +912,7 @@ func update_welcome_info():
 			connect_btn.disabled = false
 		if not host_name.is_empty():
 			if host_label: host_label.text = host_name
-			if ip_label: ip_label.text = saved_ip
+			if ip_label: ip_label.text = host_detail
 		else:
 			if host_label: host_label.text = saved_ip
 			if ip_label: ip_label.text = ""
@@ -906,7 +992,8 @@ func browse_mdns():
 			# The host's HTTP port, as advertised: Sunshine on a custom port
 			# (50000, say) only answers pairing there.
 			var address := pair_address(ip, int(host.get("port", main.DEFAULT_PAIR_PORT)))
-			main._log("[mDNS] Discovered: ip='" + ip + "' friendly='" + friendly + "' port=" + str(host.get("port", "?")))
+			# The PC's name stays out of the log: it can be a person's.
+			main._log("[mDNS] Discovered: ip='" + ip + "' port=" + str(host.get("port", "?")))
 			var btn = Button.new()
 			btn.custom_minimum_size = Vector2(400, 60)
 			btn.add_theme_font_size_override("font_size", 22)
@@ -928,7 +1015,7 @@ func browse_mdns():
 			press_style.set_bg_color(Color(0.3, 0.35, 0.5, 1.0))
 			btn.add_theme_stylebox_override("pressed", press_style)
 			btn.pressed.connect(func():
-				main._log("[mDNS] Selected host: address='" + address + "' friendly='" + friendly + "'")
+				main._log("[mDNS] Selected host: address='" + address + "'")
 				# An address can now belong to a different host/profile. Pairing
 				# first checks identity and verifies the saved certificate over TLS,
 				# and if this machine is already paired it just records the new
@@ -949,60 +1036,276 @@ func populate_server_list():
 	var ss = screens.get_node("ServerScreen")
 	var server_list = ss.get_node("ServerList")
 	for child in server_list.get_children():
+		# Out of the list at once, so the new rows get the names (Host1, ...).
+		server_list.remove_child(child)
 		child.queue_free()
 
-	var _cm2 = main.stream_backend.get_config_manager() if main.stream_backend else null
-	var hosts = _cm2.get_hosts() if _cm2 else []
+	var hosts := _saved_hosts()
 	var usb_link_up: bool = not main.stream_manager._usb_link_iface().is_empty()
 	for h in hosts:
-		var ip = h.get("localaddress", "")
-		var hname = h.get("hostname", "")
-		if hname == ip:
-			hname = ""
-		# Show the IP alongside the hostname (2026-08-26) - previously showed
-		# only one or the other, which made it hard to tell entries with the
-		# same/similar hostname apart, or to know what IP a "Pair" would
-		# actually target without selecting it first.
-		# hostname is currently always == ip (add_host() sets hostname to the
-		# pairing IP, not a real advertised name - computer_manager.cpp never
-		# reads <hostname> from serverinfo), so two hosts sharing an IP via
-		# NAT port-forwarding are otherwise indistinguishable in this list -
-		# append the https_port too (2026-08-27) so they read as, e.g.,
-		# "10.0.0.13:57984" vs "10.0.0.13:47984".
-		var https_port = h.get("https_port", 47984)
-		var display = "%s (%s:%d)" % [hname, ip, https_port] if not hname.is_empty() else "%s:%d" % [ip, https_port]
-		if not str(h.get("usb_address", "")).is_empty() and usb_link_up:
-			display += "  [USB]"
-		var btn = Button.new()
-		btn.custom_minimum_size = Vector2(400, 80)
-		btn.add_theme_font_size_override("font_size", 36)
-		btn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-		btn.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
-		btn.text = display
-		server_list.add_child(btn)
-		btn.pressed.connect(func():
-			main.get_node("%IPInput").text = ip
-			save_last_ip(ip, h.get("server_unique_id", ""))
-			main.state_manager.load_host_state(ip)
-			main.current_host_id = h.id
-			main.settings_controller.detect_polaris_host(ip, main.current_host_id)
-			show_welcome_screen("welcome")
-		)
+		server_list.add_child(_server_row(h, usb_link_up))
 
-func clear_saved_servers():
-	var _cm = main.stream_backend.get_config_manager() if main.stream_backend else null
-	if _cm:
-		_cm.clear_hosts()
-		main._log("[PAIR] Cleared all saved server pairings")
+func _saved_hosts() -> Array:
+	var cm = main.stream_backend.get_config_manager() if main.stream_backend else null
+	return cm.get_hosts() if cm else []
+
+const SERVER_ROW_HEIGHT := 92
+
+## One saved PC in the list: the button that picks it (its name, and under it
+## whatever the name leaves out), then Rename and Remove.
+func _server_row(h: Dictionary, usb_link_up: bool) -> HBoxContainer:
+	var row := HBoxContainer.new()
+	row.name = "Host%d" % int(h.id)
+	row.add_theme_constant_override("separation", 10)
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+	var pick_btn := Button.new()
+	pick_btn.name = "Pick"
+	pick_btn.custom_minimum_size = Vector2(560, SERVER_ROW_HEIGHT)
+	pick_btn.clip_contents = true
+	row.add_child(pick_btn)
+	var lines := VBoxContainer.new()
+	lines.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	lines.alignment = BoxContainer.ALIGNMENT_CENTER
+	lines.add_theme_constant_override("separation", -2)
+	lines.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	pick_btn.add_child(lines)
+	var detail := SavedHosts.detail(h)
+	if not str(h.get("usb_address", "")).is_empty() and usb_link_up:
+		detail = (detail + "  [USB]").strip_edges()
+	for line in [[SavedHosts.title(h), 34, Color.WHITE], [detail, 20, Color(0.72, 0.78, 0.9)]]:
+		if String(line[0]).is_empty():
+			continue
+		var label := Label.new()
+		label.text = line[0]
+		# Names and addresses are not words to translate.
+		label.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
+		label.add_theme_font_size_override("font_size", line[1])
+		label.add_theme_color_override("font_color", line[2])
+		label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		lines.add_child(label)
+	pick_btn.pressed.connect(func():
+		var ip: String = h.get("localaddress", "")
+		main.get_node("%IPInput").text = ip
+		save_last_ip(ip, h.get("server_unique_id", ""))
+		# Before its settings are loaded: they are filed under the PC that is
+		# picked, and several can share this address.
+		main.current_host_id = h.id
+		main.state_manager.load_host_state(ip)
+		main.settings_controller.detect_polaris_host(ip, main.current_host_id)
+		show_welcome_screen("welcome")
+	)
+
+	var rename_btn := _server_row_button("Rename", Color(0.7, 0.85, 1.0))
+	rename_btn.name = "Rename"
+	rename_btn.pressed.connect(func(): rename_saved_server(h))
+	row.add_child(rename_btn)
+
+	# Two presses, so a slip of the pointer doesn't cost a pairing.
+	var remove_btn := _server_row_button("Remove", Color(0.9, 0.5, 0.5))
+	remove_btn.name = "Remove"
+	remove_btn.pressed.connect(func():
+		if remove_btn.text == "Sure?":
+			remove_saved_server(h)
+			return
+		remove_btn.text = "Sure?"
+		await main.get_tree().create_timer(REMOVE_CONFIRM_SEC).timeout
+		if is_instance_valid(remove_btn):
+			remove_btn.text = "Remove"
+	)
+	row.add_child(remove_btn)
+	return row
+
+const REMOVE_CONFIRM_SEC := 4.0
+
+func _server_row_button(text: String, color: Color) -> Button:
+	var btn := Button.new()
+	btn.text = text
+	btn.custom_minimum_size = Vector2(150, SERVER_ROW_HEIGHT)
+	btn.add_theme_font_size_override("font_size", 26)
+	btn.add_theme_color_override("font_color", color)
+	return btn
+
+## Forgets one saved PC: its pairing on this headset, its name and its saved
+## settings. The PC still lists the headset among its paired devices, which
+## does no harm; pairing with it again replaces that entry.
+func remove_saved_server(host: Dictionary) -> void:
+	var cm = main.stream_backend.get_config_manager() if main.stream_backend else null
+	if cm == null:
+		return
+	var hosts: Array = cm.get_hosts()
+	var target := SavedHosts.find(hosts, host)
+	if not target.is_empty():
+		var current := SavedHosts.by_id(hosts, main.current_host_id)
+		cm.remove_host(target.id)
+		hosts = cm.get_hosts()
+		main.state_manager.forget_host_state(target, hosts)
+		main._log("[PAIR] Removed one saved server, %d left" % hosts.size())
+		if SavedHosts.same(current, target):
+			main.current_host_id = -1
+			main.get_node("%IPInput").text = ""
+			save_last_ip("")
+		else:
+			# Removing a record renumbers the ones after it.
+			main.current_host_id = SavedHosts.find(hosts, current).get("id", -1)
 	populate_server_list()
-	var screens = main.welcome_viewport.get_node_or_null("WelcomeRoot/Screens")
-	if screens:
-		var ws = screens.get_node_or_null("WelcomeScreen")
-		if ws:
-			var connect_btn = ws.get_node_or_null("WelcomeConnect")
-			if connect_btn:
-				connect_btn.text = "Connect"
-				connect_btn.disabled = false
+
+# --- Naming a saved PC ---
+
+const NAME_KEY_ROWS: Array[String] = ["1234567890", "QWERTYUIOP", "ASDFGHJKL-", "ZXCVBNM_"]
+var _naming: Dictionary = {}
+var _name_text := ""
+var _name_shift := true
+var _name_keys: Array[Button] = []
+
+func build_name_screen(parent: Node) -> void:
+	var screen := VBoxContainer.new()
+	screen.name = "NameScreen"
+	screen.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	screen.add_theme_constant_override("separation", 0)
+	screen.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	screen.visible = false
+	parent.add_child(screen)
+	_name_spacer(screen, 0, true)
+
+	var heading := Label.new()
+	heading.text = "Name This PC"
+	heading.add_theme_font_size_override("font_size", 48)
+	heading.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	heading.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	screen.add_child(heading)
+
+	var which := Label.new()
+	which.name = "NameWhich"
+	which.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
+	which.add_theme_font_size_override("font_size", 24)
+	which.add_theme_color_override("font_color", Color(0.72, 0.78, 0.9))
+	which.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	which.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	screen.add_child(which)
+	_name_spacer(screen, 24)
+
+	var field := Label.new()
+	field.name = "NameField"
+	field.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
+	field.custom_minimum_size = Vector2(700, 80)
+	field.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	field.add_theme_font_size_override("font_size", 40)
+	field.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	field.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	var field_box := StyleBoxFlat.new()
+	field_box.set_bg_color(Color(0.08, 0.1, 0.16, 0.9))
+	field_box.set_border_width_all(1)
+	field_box.set_border_color(Color(0.3, 0.4, 0.6, 0.8))
+	field_box.set_corner_radius_all(8)
+	field.add_theme_stylebox_override("normal", field_box)
+	field.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	screen.add_child(field)
+	_name_spacer(screen, 24)
+
+	_name_keys.clear()
+	for keys in NAME_KEY_ROWS:
+		var line := _name_row(screen)
+		for ch in keys:
+			var key := _name_key(ch, 84, func(): _name_type(ch))
+			# A letter is not a word to translate.
+			key.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
+			key.set_meta("letter", ch)
+			_name_keys.append(key)
+			line.add_child(key)
+		_name_spacer(screen, 8)
+	var edit_row := _name_row(screen)
+	edit_row.add_child(_name_key("Shift", 170, func():
+		_name_shift = not _name_shift
+		_refresh_name_screen()))
+	edit_row.add_child(_name_key("Space", 300, func(): _name_type(" ")))
+	edit_row.add_child(_name_key("Del", 170, func():
+		_name_text = _name_text.left(maxi(0, _name_text.length() - 1))
+		_refresh_name_screen()))
+	edit_row.add_child(_name_key("Clear", 170, func():
+		_name_text = ""
+		_name_shift = true
+		_refresh_name_screen()))
+	_name_spacer(screen, 20)
+
+	var hint := Label.new()
+	hint.text = "Leave the name empty to show the PC's own name."
+	hint.add_theme_font_size_override("font_size", 22)
+	hint.add_theme_color_override("font_color", Color(0.72, 0.78, 0.9))
+	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	hint.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	screen.add_child(hint)
+	_name_spacer(screen, 20)
+
+	var action_row := _name_row(screen)
+	action_row.add_theme_constant_override("separation", 16)
+	var save_btn := _name_key("Save", 240, func(): _save_name())
+	save_btn.name = "NameSave"
+	save_btn.custom_minimum_size.y = 90
+	action_row.add_child(save_btn)
+	var cancel_btn := _name_key("Cancel", 240, func(): show_welcome_screen("server"))
+	cancel_btn.name = "NameCancel"
+	cancel_btn.custom_minimum_size.y = 90
+	action_row.add_child(cancel_btn)
+	_name_spacer(screen, 0, true)
+	_name_spacer(screen, 40)
+
+func _name_spacer(parent: Node, height: int, expand: bool = false) -> void:
+	var spacer := Control.new()
+	spacer.custom_minimum_size = Vector2(0, height)
+	if expand:
+		spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	parent.add_child(spacer)
+
+func _name_row(parent: Node) -> HBoxContainer:
+	var line := HBoxContainer.new()
+	line.alignment = BoxContainer.ALIGNMENT_CENTER
+	line.add_theme_constant_override("separation", 8)
+	line.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	parent.add_child(line)
+	return line
+
+func _name_key(text: String, width: int, action: Callable) -> Button:
+	var key := Button.new()
+	key.text = text
+	key.focus_mode = Control.FOCUS_NONE
+	key.custom_minimum_size = Vector2(width, 72)
+	key.add_theme_font_size_override("font_size", 32)
+	key.pressed.connect(action)
+	return key
+
+func _name_type(letter: String) -> void:
+	if _name_text.length() < SavedHosts.NAME_MAX:
+		_name_text += letter if _name_shift else letter.to_lower()
+	# Shift holds for one letter, and comes back for the start of each word.
+	_name_shift = letter == " "
+	_refresh_name_screen()
+
+func _refresh_name_screen() -> void:
+	var screen = main.welcome_viewport.get_node_or_null("WelcomeRoot/Screens/NameScreen")
+	if not screen:
+		return
+	screen.get_node("NameWhich").text = SavedHosts.described(_naming)
+	screen.get_node("NameField").text = _name_text + "_"
+	for key in _name_keys:
+		var letter: String = key.get_meta("letter")
+		key.text = letter if _name_shift else letter.to_lower()
+
+func rename_saved_server(host: Dictionary) -> void:
+	_naming = host
+	_name_text = str(host.get("name", ""))
+	_name_shift = _name_text.is_empty()
+	show_welcome_screen("name")
+
+func _save_name() -> void:
+	var cm = main.stream_backend.get_config_manager() if main.stream_backend else null
+	var target := SavedHosts.find(_saved_hosts(), _naming)
+	if cm and not target.is_empty():
+		cm.update_host(target.id, {"name": SavedHosts.clean_name(_name_text)})
+	show_welcome_screen("server")
 
 func start_pair(ip: String):
 	main.get_node("%IPInput").text = ip
@@ -1024,6 +1327,28 @@ func start_pair(ip: String):
 const PIN_DELAY_SEC := 1.0
 var _pin_pending := 0
 
+# The PIN screen's heading and the line under the PIN, for each stage:
+# the PIN is to be typed on the host; Meteor has taken the request and asks
+# on the PC; nobody answered within Meteor's minute.
+const PIN_HEAD_HOST := "Enter PIN on Host"
+const PIN_HEAD_METEOR := "Approve pairing on your PC"
+const PIN_HEAD_EXPIRED := "Pairing request expired"
+const PIN_HELP_HOST := "On your PC, open the streaming host's web page (Sunshine, Apollo or Vibepollo), find PIN or Clients, and type this PIN."
+const PIN_HELP_METEOR := "Nightfall Meteor on your PC is asking: choose Yes in its window.\nNo window? Right-click the Meteor icon by the clock and choose Approve pairing."
+const PIN_HELP_EXPIRED := "A request lasts one minute. Press Back and pair again, or type the PIN on the host's web page."
+const PIN_HELP_FONT := 28
+const PIN_HELP_WIDTH := 1300.0
+const PIN_APPROVAL_SECONDS := 60.0
+
+## Sets the PIN screen's heading and help line together.
+func set_pin_stage(heading_text: String, help_text: String) -> void:
+	if main.welcome_viewport == null:
+		return
+	var heading = main.welcome_viewport.get_node_or_null("WelcomeRoot/Screens/PINScreen/PINHeading")
+	var help = main.welcome_viewport.get_node_or_null("WelcomeRoot/Screens/PINScreen/PINHelp")
+	if heading: heading.text = heading_text
+	if help: help.text = help_text
+
 func show_pin_when_needed(pin: String) -> void:
 	main._pair_pin = pin
 	_pin_pending += 1
@@ -1031,18 +1356,26 @@ func show_pin_when_needed(pin: String) -> void:
 	await main.get_tree().create_timer(PIN_DELAY_SEC).timeout
 	if ticket == _pin_pending:
 		show_welcome_screen("pin")
-		var heading = main.welcome_viewport.get_node_or_null("WelcomeRoot/Screens/PINScreen/PINHeading")
-		if heading: heading.text = "Enter PIN on Host"
+		set_pin_stage(PIN_HEAD_HOST, PIN_HELP_HOST)
 		var address: Array = main.parse_ip_port(main.get_node("%IPInput").text)
 		var identity: String = main.stream_backend.get_last_paired_unique_id()
 		var xr_identity: String = get_xr_control().public_identity()
 		var offered := await MeteorHostPairing.request(main, address[0], address[1], pin, identity, xr_identity, func(): return ticket == _pin_pending)
 		if offered and ticket == _pin_pending:
-			if heading: heading.text = "Approve pairing in Meteor on your PC"
+			set_pin_stage(PIN_HEAD_METEOR, PIN_HELP_METEOR)
 			main._log("[PAIR] Meteor is waiting for desktop approval")
-			await main.get_tree().create_timer(60.0).timeout
-			if ticket == _pin_pending and is_instance_valid(heading):
-				heading.text = "Approval expired — enter PIN on Host or retry"
+			await main.get_tree().create_timer(PIN_APPROVAL_SECONDS).timeout
+			if ticket == _pin_pending:
+				set_pin_stage(PIN_HEAD_EXPIRED, PIN_HELP_EXPIRED)
+
+## Text under "Select Server" ("" hides it). error = red, otherwise light blue.
+func set_server_message(text: String, error: bool = false) -> void:
+	var msg = main.welcome_viewport.get_node_or_null("WelcomeRoot/Screens/ServerScreen/ServerMessage") if main.welcome_viewport else null
+	if msg == null:
+		return
+	msg.text = text
+	msg.visible = not text.is_empty()
+	msg.add_theme_color_override("font_color", Color(1.0, 0.55, 0.5) if error else Color(0.7, 0.85, 1.0))
 
 ## Called when pairing finishes, either way: a PIN still waiting stays hidden.
 func pairing_finished() -> void:

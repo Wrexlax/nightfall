@@ -1,0 +1,241 @@
+{
+	"whisper": "pl",
+	"on": [
+		"wł",
+		"włączone",
+		"włączony",
+		"włącz",
+		"włączyć"
+	],
+	"off": [
+		"wył",
+		"wyłączone",
+		"wyłączony",
+		"wyłącz",
+		"wyłączyć"
+	],
+	"next": [
+		"następny",
+		"następna",
+		"następne",
+		"zmień",
+		"dalej"
+	],
+	"enable": [
+		"aktywuj"
+	],
+	"disable": [
+		"dezaktywuj"
+	],
+	"minus": [
+		"minus"
+	],
+	"plus": [
+		"plus"
+	],
+	"to": [
+		"na",
+		"do"
+	],
+	"drop": [
+		"proszę",
+		"ustaw"
+	],
+	"commands": {
+		"recenter": [
+			"wyśrodkuj",
+			"wyśrodkuj ekran",
+			"wycentruj"
+		],
+		"show menu": [
+			"pokaż menu",
+			"otwórz menu"
+		],
+		"hide menu": [
+			"ukryj menu",
+			"zamknij menu"
+		],
+		"menu": [
+			"menu"
+		],
+		"show keyboard": [
+			"pokaż klawiaturę",
+			"otwórz klawiaturę"
+		],
+		"hide keyboard": [
+			"ukryj klawiaturę",
+			"zamknij klawiaturę"
+		],
+		"keyboard": [
+			"klawiatura"
+		],
+		"head lock on": [
+			"blokada głowy wł",
+			"włącz blokadę głowy",
+			"zablokuj głowę"
+		],
+		"head lock off": [
+			"blokada głowy wył",
+			"wyłącz blokadę głowy",
+			"odblokuj głowę"
+		],
+		"volume up": [
+			"głośniej",
+			"zwiększ głośność",
+			"podgłośnij"
+		],
+		"volume down": [
+			"ciszej",
+			"zmniejsz głośność",
+			"ścisz"
+		],
+		"volume #": [
+			"głośność #"
+		],
+		"mute": [
+			"wycisz",
+			"wyłącz dźwięk"
+		],
+		"unmute": [
+			"wyłącz wyciszenie",
+			"włącz dźwięk"
+		],
+		"curve #": [
+			"krzywizna #"
+		],
+		"flat screen": [
+			"płaski ekran",
+			"płaski",
+			"bez krzywizny"
+		],
+		"passthrough fade #": [
+			"przyciemnienie passthrough #",
+			"przyciemnij pokój #"
+		],
+		"glow strength #": [
+			"siła poświaty #"
+		],
+		"glow size #": [
+			"rozmiar poświaty #"
+		],
+		"separation #": [
+			"separacja #"
+		],
+		"convergence #": [
+			"zbieżność #"
+		],
+		"select all": [
+			"zaznacz wszystko"
+		],
+		"copy": [
+			"kopiuj"
+		],
+		"paste": [
+			"wklej"
+		],
+		"cut": [
+			"wytnij"
+		],
+		"undo": [
+			"cofnij"
+		],
+		"redo": [
+			"ponów"
+		],
+		"save": [
+			"zapisz"
+		],
+		"find": [
+			"znajdź",
+			"szukaj"
+		],
+		"new tab": [
+			"nowa karta"
+		],
+		"close tab": [
+			"zamknij kartę"
+		],
+		"close window": [
+			"zamknij okno"
+		],
+		"switch window": [
+			"przełącz okno"
+		],
+		"show desktop": [
+			"pokaż pulpit"
+		],
+		"task manager": [
+			"menedżer zadań"
+		],
+		"start menu": [
+			"menu start",
+			"klawisz windows"
+		],
+		"screenshot": [
+			"zrzut ekranu"
+		],
+		"escape": [
+			"escape"
+		],
+		"enter": [
+			"enter"
+		],
+		"tab key": [
+			"tabulator",
+			"klawisz tab"
+		],
+		"backspace": [
+			"backspace",
+			"cofnij znak"
+		],
+		"delete": [
+			"delete",
+			"usuń"
+		],
+		"page up": [
+			"strona w górę",
+			"page up"
+		],
+		"page down": [
+			"strona w dół",
+			"page down"
+		]
+	},
+	"typing": {
+		"clear": [
+			"wyczyść",
+			"usuń"
+		],
+		"submit": [
+			"wyślij"
+		],
+		"new line": [
+			"nowa linia",
+			"nowy wiersz"
+		],
+		"new paragraph": [
+			"nowy akapit"
+		],
+		"open parenthesis": [
+			"otwórz nawias",
+			"nawias otwierający"
+		],
+		"close parenthesis": [
+			"zamknij nawias",
+			"nawias zamykający"
+		]
+	},
+	"help": [
+		"Powiedz nazwę przycisku i to, czym ma być: tak działa każdy przycisk w menu",
+		"Następna wartość przycisku",
+		"Przycisk bez wyboru: sama nazwa"
+	],
+	"list": {
+		"commands": "Polecenia",
+		"menu": "Dowolny przycisk w menu",
+		"typing": "Podczas dyktowania",
+		"note": "Przytrzymaj przycisk głosu i powiedz samo polecenie.",
+		"note_prefix": "Zaczynaj każde polecenie od słowa „Nightfall”.",
+		"note_off": "Polecenia głosowe są wyłączone: wszystko, co mówisz, jest wpisywane."
+	}
+}

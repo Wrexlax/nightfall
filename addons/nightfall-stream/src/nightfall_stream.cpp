@@ -364,6 +364,11 @@ String NightfallStream::start_meteor_mic(const String &host, int port, const Str
     return String::utf8(meteor_mic_->start(host.utf8().get_data(), port, meteor_key.utf8().get_data(), opus).c_str());
 }
 
+String NightfallStream::set_meteor_mic_second(const String &host) {
+    if (!meteor_mic_) return String();
+    return String::utf8(meteor_mic_->set_second(host.utf8().get_data()).c_str());
+}
+
 void NightfallStream::stop_meteor_mic() {
     if (meteor_mic_) meteor_mic_->stop();
 }
@@ -421,6 +426,30 @@ int NightfallStream::get_decode_queue_size() const {
 int NightfallStream::get_last_frame_latency_us() const {
     if (stream_connection_) return stream_connection_->get_last_frame_latency_us();
     return 0;
+}
+
+void NightfallStream::set_second_link(const String &address) {
+    if (stream_connection_) stream_connection_->set_second_link(address);
+}
+
+void NightfallStream::set_second_link_choice(int choice, int rev) {
+    if (stream_connection_) stream_connection_->set_second_link_choice(choice, rev);
+}
+
+void NightfallStream::set_second_link_control(bool enabled) {
+    if (stream_connection_) stream_connection_->set_second_link_control(enabled);
+}
+
+bool NightfallStream::request_keyframe() {
+    return stream_connection_ ? stream_connection_->request_keyframe() : false;
+}
+
+void NightfallStream::set_second_link_watch(bool enabled) {
+    if (stream_connection_) stream_connection_->set_second_link_watch(enabled);
+}
+
+Dictionary NightfallStream::get_second_link_stats() const {
+    return stream_connection_ ? stream_connection_->get_second_link_stats() : Dictionary();
 }
 
 int NightfallStream::get_network_latency_ms() const {
@@ -750,6 +779,7 @@ void NightfallStream::_bind_methods() {
     ClassDB::bind_method(D_METHOD("get_audio_renderer"), &NightfallStream::get_audio_renderer);
     ClassDB::bind_method(D_METHOD("start_meteor_mic", "host", "port", "meteor_key", "opus"), &NightfallStream::start_meteor_mic);
     ClassDB::bind_method(D_METHOD("stop_meteor_mic"), &NightfallStream::stop_meteor_mic);
+    ClassDB::bind_method(D_METHOD("set_meteor_mic_second", "host"), &NightfallStream::set_meteor_mic_second);
     ClassDB::bind_method(D_METHOD("set_meteor_mic_muted", "muted"), &NightfallStream::set_meteor_mic_muted);
     ClassDB::bind_method(D_METHOD("get_meteor_mic_status"), &NightfallStream::get_meteor_mic_status);
     ClassDB::bind_method(D_METHOD("get_input_bridge"), &NightfallStream::get_input_bridge);
@@ -760,6 +790,12 @@ void NightfallStream::_bind_methods() {
     ClassDB::bind_method(D_METHOD("get_decode_queue_size"), &NightfallStream::get_decode_queue_size);
     ClassDB::bind_method(D_METHOD("get_last_frame_latency_us"), &NightfallStream::get_last_frame_latency_us);
     ClassDB::bind_method(D_METHOD("get_network_latency_ms"), &NightfallStream::get_network_latency_ms);
+    ClassDB::bind_method(D_METHOD("set_second_link", "address"), &NightfallStream::set_second_link);
+    ClassDB::bind_method(D_METHOD("get_second_link_stats"), &NightfallStream::get_second_link_stats);
+    ClassDB::bind_method(D_METHOD("set_second_link_choice", "choice", "rev"), &NightfallStream::set_second_link_choice);
+    ClassDB::bind_method(D_METHOD("set_second_link_watch", "enabled"), &NightfallStream::set_second_link_watch);
+    ClassDB::bind_method(D_METHOD("request_keyframe"), &NightfallStream::request_keyframe);
+    ClassDB::bind_method(D_METHOD("set_second_link_control", "enabled"), &NightfallStream::set_second_link_control);
     ClassDB::bind_method(D_METHOD("take_performance_stats"), &NightfallStream::take_performance_stats);
     ClassDB::bind_method(D_METHOD("is_display_ready"), &NightfallStream::is_display_ready);
     ClassDB::bind_method(D_METHOD("get_codec_capabilities_info"), &NightfallStream::get_codec_capabilities_info);

@@ -671,11 +671,11 @@ impl MeteorTray {
         match self.status.firewall() {
             Status::Checking | Status::Open => vec![],
             Status::Blocked { zone, ports } => vec![
-                info(format!("Firewall is blocking the Quest ({} ports, zone {zone})", ports.len())),
-                allow("Allow the Quest through the firewall"),
+                info(format!("Firewall is blocking the headset ({} ports, zone {zone})", ports.len())),
+                allow("Allow the headset through the firewall"),
             ],
             Status::Ufw => vec![
-                info("ufw is on; Meteor can't check that the Quest gets through".into()),
+                info("ufw is on; Meteor can't check that the headset gets through".into()),
                 allow("Open Meteor's ports in ufw"),
             ],
             Status::Windows { .. } => vec![],

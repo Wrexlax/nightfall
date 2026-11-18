@@ -33,6 +33,11 @@ const IDLE_COLOR := Color(1.0, 1.0, 1.0, 0.45)
 const HOVER_COLOR := Color(1.0, 1.0, 1.0, 0.9)
 const ACTIVE_COLOR := Color(0.32, 0.64, 1.0, 0.9)
 const ACTIVE_HOVER_COLOR := ACTIVE_COLOR
+# Steam Frame with Icon Backdrop off: no dark panel behind the icons, and the
+# fainter colours they had before upstream 0.9 brightened them to stand out on it.
+const FRAME_IDLE_COLOR := Color(1.0, 1.0, 1.0, 0.05)
+const FRAME_HOVER_COLOR := Color(1.0, 1.0, 1.0, 0.25)
+const FRAME_ACTIVE_COLOR := Color(0.32, 0.64, 1.0, 0.40)
 const PRIMARY_BAR_COLOR := Color(0.55, 0.78, 1.0)
 # A dark rounded panel behind the revealed icons, so the faint white icons
 # stay visible against a bright passthrough room (a white wall).
@@ -40,6 +45,8 @@ const BACKDROP_COLOR := Color(0.0, 0.0, 0.0, 0.55)
 const BACKDROP_PAD_RATIO := 0.0045
 const BACKDROP_CORNER := 0.4 # of the panel's height
 const BACKDROP_SHADER := preload("res://src/shaders/rounded_rect.gdshader")
+const LOCKED_PAD_COLOR := Color(0.55, 0.68, 0.85, 0.30)
+const LOCKED_PAD_HOVER_COLOR := Color(0.55, 0.68, 0.85, 0.50)
 
 # All dimensions scale with screen width. The composition viewport uses the
 # same normalized layout, so its visuals stay aligned with these hit targets.
@@ -52,6 +59,10 @@ const ICON_GAP_RATIO := 0.014
 const HIT_SIZE_RATIO := 0.044
 const COMP_VIEWPORT_SIZE := Vector2i(981, 98)
 const HIDE_DELAY_SECONDS := 0.5
+
+# Steam Frame Gamepad mode: only the gamepad icon shows, in the bar's place.
+static var pad_centered := false
+var _bar_log_state := -1
 
 var main: Node3D
 var hovered_action: StringName = &""
@@ -156,6 +167,7 @@ func populate_composition_viewport(screen: VRScreen, viewport: SubViewport) -> v
 		var x_px = (x_world / world_width + 0.5) * COMP_VIEWPORT_SIZE.x
 		rect.position = Vector2(x_px - icon_px * 0.5, center_y - icon_px * 0.5)
 		rect.size = Vector2(icon_px, icon_px)
+		rect.set_meta(&"icon_px", icon_px)
 		rect.modulate = IDLE_COLOR
 		root.add_child(rect)
 		screen.comp_shortcut_icons[action] = rect
@@ -172,6 +184,20 @@ func populate_composition_viewport(screen: VRScreen, viewport: SubViewport) -> v
 			dot.visible = false
 			root.add_child(dot)
 	refresh_visuals(screen)
+
+func _place_comp_icons(screen: VRScreen) -> void:
+	for action in VISIBLE_ACTIONS:
+		var rect = screen.comp_shortcut_icons.get(action) as TextureRect
+		if rect == null:
+			continue
+		var icon_px: float = rect.get_meta(&"icon_px", rect.size.x)
+		var x_px = (_action_x_ratio(action) / STRIP_WIDTH_RATIO + 0.5) * COMP_VIEWPORT_SIZE.x
+		rect.position.x = x_px - icon_px * 0.5
+	var dot = screen.comp_grab_bar_viewport.find_child("LiveDot", true, false) as TextureRect if screen.comp_grab_bar_viewport else null
+	var mic = screen.comp_shortcut_icons.get(ACTION_MIC) as TextureRect
+	if dot and mic:
+		var ipx: float = mic.get_meta(&"icon_px", mic.size.x)
+		dot.position.x = mic.position.x + ipx * 0.5 + ipx * LIVE_DOT_OFFSET - dot.size.x * 0.5
 
 # A child of the microphone icon; VRScreen.update_shortcut_positions() sizes it.
 func _make_live_dot() -> MeshInstance3D:
@@ -253,6 +279,15 @@ func refresh_visuals(screen: VRScreen) -> void:
 		return
 	var changed = false
 	var show = screen == main.primary_screen and controls_are_revealed(screen)
+	var frame: bool = main.device_is_steam_frame
+	var faint_icons: bool = frame and not main.settings.icon_backdrop
+	var locked: bool = frame and main.xr_interaction != null and main.xr_interaction.screen_controls_locked()
+	if frame and screen == main.primary_screen and locked != pad_centered:
+		pad_centered = locked
+		for sc in main.screens:
+			sc.update_shortcut_positions()
+			_place_comp_icons(sc)
+		changed = true
 	var bar_rgb = PRIMARY_BAR_COLOR if screen == main.primary_screen else Color.WHITE
 	if screen.grab_bar and screen.grab_bar.material_override:
 		var real_bar_color = screen.grab_bar.material_override.albedo_color
@@ -270,34 +305,61 @@ func refresh_visuals(screen: VRScreen) -> void:
 					style.bg_color = desired_comp_bar
 					bar.add_theme_stylebox_override("panel", style)
 					changed = true
+			# Steam Frame: the bar only shows when you point near it, and not
+			# at all while Gamepad mode has the controls locked.
+			if frame:
+				var bar_vis: bool = (show or main.grabbed_node == screen) and not locked
+				if bar.visible != bar_vis:
+					bar.visible = bar_vis
+					changed = true
+	# The dark panel behind the icons (new in upstream 0.9). Steam Frame: an
+	# Advanced Settings option (Icon Backdrop); and never while Gamepad mode
+	# has the controls locked, where the lone gamepad icon stands in for the bar.
+	var backdrop_show: bool = show and not locked and not faint_icons
 	if screen.shortcut_backdrop:
-		screen.shortcut_backdrop.visible = show
+		screen.shortcut_backdrop.visible = backdrop_show
 	if screen.comp_grab_bar_viewport:
 		var backdrop = screen.comp_grab_bar_viewport.find_child("ShortcutBackdrop", true, false) as Panel
-		if backdrop and backdrop.visible != show:
-			backdrop.visible = show
+		if backdrop and backdrop.visible != backdrop_show:
+			backdrop.visible = backdrop_show
 			changed = true
+	# Steam Frame: the bar itself (the 3D one drawn in the scene) hides with
+	# the icons, and stays hidden while Gamepad mode has the controls locked.
+	if frame and screen.grab_bar:
+		var bar_shown: bool = (show or main.grabbed_node == screen) and not locked
+		# Hiding the node (not just its colour) - its Area3D still catches the
+		# pointer, which is what reveals the bar again.
+		if screen.grab_bar.visible != bar_shown:
+			screen.grab_bar.visible = bar_shown
+			if _bar_log_state != int(bar_shown):
+				_bar_log_state = int(bar_shown)
 	for action in VISIBLE_ACTIONS:
 		var active = _is_active(action)
 		var color: Color
-		if active:
+		if faint_icons:
+			color = FRAME_ACTIVE_COLOR if active else (FRAME_HOVER_COLOR if action == hovered_action else FRAME_IDLE_COLOR)
+		elif active:
 			color = ACTIVE_HOVER_COLOR if action == hovered_action else ACTIVE_COLOR
 		else:
 			color = HOVER_COLOR if action == hovered_action else IDLE_COLOR
+		var icon_show: bool = show and (not locked or action == ACTION_PAD)
+		if locked and action == ACTION_PAD:
+			# Standing in for the bar: the bar's dusky blue, not eye-catching.
+			color = LOCKED_PAD_HOVER_COLOR if action == hovered_action else LOCKED_PAD_COLOR
 		var icon = screen.shortcut_buttons.get(action) as MeshInstance3D
 		if icon and icon.material_override:
-			icon.visible = show
+			icon.visible = icon_show
 			if icon.material_override.albedo_color != color:
 				icon.material_override.albedo_color = color
 		var comp_icon = screen.comp_shortcut_icons.get(action) as TextureRect
 		if comp_icon:
-			if comp_icon.visible != show:
-				comp_icon.visible = show
+			if comp_icon.visible != icon_show:
+				comp_icon.visible = icon_show
 				changed = true
 			if comp_icon.modulate != color:
 				comp_icon.modulate = color
 				changed = true
-	var live = show and _mic_live()
+	var live = show and not locked and _mic_live()
 	var mic_icon = screen.shortcut_buttons.get(ACTION_MIC) as MeshInstance3D
 	var dot = mic_icon.get_node_or_null("LiveDot") as MeshInstance3D if mic_icon else null
 	if dot:
@@ -368,6 +430,8 @@ func _make_backdrop_mesh() -> MeshInstance3D:
 	return backdrop
 
 static func _action_x_ratio(action: StringName) -> float:
+	if pad_centered and action == ACTION_PAD:
+		return 0.0
 	var near = BAR_WIDTH_RATIO * 0.5 + ICON_GAP_RATIO + ICON_SIZE_RATIO * 0.5
 	var step = ICON_SIZE_RATIO + ICON_GAP_RATIO
 	match action:

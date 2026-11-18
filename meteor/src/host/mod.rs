@@ -196,13 +196,23 @@ pub fn prepare(config: &crate::config::Config, state: &mut State, base: u16) -> 
         std::fs::write(&marker, "Managed by Nightfall Meteor.\n").map_err(|error| error.to_string())?;
     }
     instance.write_config(&instance::host_name())?;
-    if state.password.is_empty() || !instance.appdata().join("sunshine_state.json").is_file() {
+    let login_file = instance.appdata().join("sunshine_state.json");
+    if state.password.is_empty() || !login_file.is_file() {
         let user = "nightfall".to_string();
         let password = new_password();
         instance.set_creds(&user, &password)?;
         state.user = user;
         state.password = password;
         save_state(state)?;
+    } else if std::fs::read_to_string(&login_file).is_ok_and(|saved| login_differs(&saved, &state.user, &state.password)) {
+        // Steam Frame port. host.toml is shared by every copy of Meteor a
+        // person runs, the host's own login file is not: a second copy (a
+        // portable one beside the installed one, 2026-11-18) makes a password
+        // for its host and writes it to host.toml, and from then on this
+        // copy's host refuses the login Meteor approves pairing with
+        // ("Cannot submit the PIN"). Give the host the login host.toml holds.
+        log::warn!("The host's saved login is not the one in host.toml (another copy of Meteor may have written it); setting it again so that approving a pairing works");
+        instance.set_creds(&state.user, &state.password)?;
     }
     write_kwin_permission(&instance.binary);
     Ok(instance)
@@ -238,6 +248,21 @@ fn write_kwin_permission(binary: &std::path::Path) {
 }
 
 /// A random password for the web UI, which only Meteor uses.
+/// Whether the host's login file (`sunshine_state.json`: a user name, a
+/// salt, and the SHA-256 of password + salt in hex) holds another login than
+/// this one. A file that can't be read that way counts as not differing:
+/// nothing is changed on a guess.
+fn login_differs(saved: &str, user: &str, password: &str) -> bool {
+    use sha2::{Digest, Sha256};
+    let Ok(saved) = serde_json::from_str::<serde_json::Value>(saved) else { return false };
+    let (Some(name), Some(salt), Some(hash)) = (saved["username"].as_str(), saved["salt"].as_str(), saved["password"].as_str()) else { return false };
+    let mut hasher = Sha256::new();
+    hasher.update(password.as_bytes());
+    hasher.update(salt.as_bytes());
+    let ours: String = hasher.finalize().iter().map(|b| format!("{b:02x}")).collect();
+    name != user || !ours.eq_ignore_ascii_case(hash)
+}
+
 pub fn new_password() -> String {
     let mut bytes = [0u8; 18];
     ring::rand::SecureRandom::fill(&ring::rand::SystemRandom::new(), &mut bytes).expect("system random");
@@ -247,6 +272,18 @@ pub fn new_password() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_host_login_that_is_not_host_tomls_is_noticed() {
+        // SHA-256 of "secret" + "abcd", as the host writes it (capitals).
+        let saved = r#"{"username":"nightfall","salt":"abcd","password":"A86496FA83482C96733FC5DFC00AA6F281DBD695255EE97FA383FA4F917D742E","root":{"named_devices":[]}}"#;
+        assert!(!login_differs(saved, "nightfall", "secret"));
+        assert!(login_differs(saved, "nightfall", "another"));
+        assert!(login_differs(saved, "someone", "secret"));
+        // Not the host's format: left alone.
+        assert!(!login_differs("{}", "nightfall", "secret"));
+        assert!(!login_differs("not json", "nightfall", "secret"));
+    }
     use crate::config::Config;
 
     #[test]
