@@ -304,6 +304,17 @@ differs: these were measured with one PC (an RTX 5090).
   5K setting, 144 hitches (about 104 fps, with dips to 78, in our test).
   With the camera at 2.5K it held about 140, with dips to about 120. How to
   set that is under "Make it yours" above.
+- **Stream Link** doesn't change what the headset can hold; it changes how
+  many frames go missing on the way to it. Measured at 144 fps:
+
+  | Stream Link | Video frames lost |
+  | --- | --- |
+  | Wi-Fi only | about 24 a minute on strong Wi-Fi; 110 to 130 in earlier sessions |
+  | Multi-Link | none in 10 minutes |
+  | Adapter first | none while the adapter was in reach |
+
+  On Multi-Link the adapter's copy arrived first for about 95% of packets,
+  and every packet Wi-Fi lost came over the adapter instead.
 - 72 and 120 fps, and 4K streams, have not been measured with this build.
 - If the picture turns choppy all at once, SteamVR has probably halved the
   rate because the headset fell behind: lower FPS or Resolution one step.

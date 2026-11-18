@@ -41,6 +41,8 @@ published from.
   stick move, roll, push away and resize a screen), and "What frame rate
   to expect" (what held in our tests at 90 and 144 fps, and that a color
   camera at its 5K setting hitches at 144 where 2.5K did not).
+  Added to it afterwards: Stream Link's measured results (video frames
+  lost on Wi-Fi only, Multi-Link and Adapter first; from 7s and 7t).
 - Confirmed on the headset and the PC: the default buttons, replacing a
   highlighted part of the address, Meteor 0.9.0-sf19 from its Setup, and
   the Licences entries.
