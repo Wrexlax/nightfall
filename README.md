@@ -389,7 +389,7 @@ in the source.
 - **Languages** other than English are first drafts, and voice commands in
   them have barely been heard by a speech model. Corrections are welcome.
 - **Two different Meteors.** This port comes with its own build of
-  Nightfall Meteor (its version ends in `-sf`, like 0.9.0-sf18), and that
+  Nightfall Meteor (its version ends in `-sf`, like 0.9.0-sf19), and that
   is the one everything in this README describes. The *original* Nightfall
   Meteor from tB0nE (0.9.1 or later) also works with this headset build,
   with less: its Multi-Link carries picture and sound over both links but
@@ -397,11 +397,8 @@ in the source.
   media keys, no pairing window and no Stream Link choice in its menu. Run
   only one of the two at a time.
 - **Beside the original's Steam Frame build.** This port keeps its settings
-  in a folder of its own, so both can be installed. If you used an earlier
-  build of this port (before 8u) together with the original's and Nightfall
-  starts with settings that aren't yours, press Advanced Settings > General
-  > **Reset Settings** twice: it restarts with this port's own first-install
-  settings. Your paired PCs, button mappings and language are kept.
+  in a folder of its own, so both can be installed on one headset without
+  one starting with the other's settings.
 - **Not in this build:** the in-headset browser, PCVR, the PyroWave codec.
 
 ## Planned
