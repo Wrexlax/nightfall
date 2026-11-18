@@ -65,7 +65,7 @@ There are two parts:
   back, look up, recenter, and it is above you the right way up.
 - **Controls that get out of the way.** The grab bar and its icons under
   the screen only show while you point near them, and are gone half a
-  second after you point away, so nothing sits over your game or film.
+  second after you point away, so nothing distracted from your game or film.
 - **Your controllers as a gamepad, without accidents.** In Game Controller
   mode the two controllers act as one gamepad for the PC. The grab bar
   shrinks to a single gamepad icon so nothing gets pressed by mistake while
