@@ -441,8 +441,8 @@ the sound one itself, in its 0.9.1.
 - **Sound** carries on after the PC has been silent for a while.
 - **The headset microphone** reaches Windows on both channels and keeps
   going through a long recording.
-- **Pairing.** Meteor asks in a window on the PC, and approving still works
-  after another copy of Meteor has been run on the same PC.
+- **Pairing** still works after another copy of Meteor has been run on
+  the same PC.
 - **TensorRT on more NVIDIA cards.** Meteor's faster TensorRT depth engine
   is tB0nE's. This port only added checksums so that its download also
   works for more NVIDIA generations, RTX 20 to RTX 50. So far it has run
