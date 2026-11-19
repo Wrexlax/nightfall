@@ -1,4 +1,4 @@
-# Nightfall for Steam Frame (unofficial port, preview)
+# Unofficial Steam Frame port of tB0nE's Nightfall (preview)
 
 Your PC's screen as a big virtual screen in the Steam Frame, in 2D or 3D,
 running as a native SteamOS app.
@@ -496,5 +496,5 @@ The port's code, its tests and its translations were written with an AI
 assistant (Claude, by Anthropic), directed and tested on the headset by a
 person.
 
-Nightfall for Steam Frame is not affiliated with or endorsed by Valve.
+This port is not affiliated with or endorsed by Valve.
 Steam, SteamVR and Steam Frame are trademarks of Valve Corporation.

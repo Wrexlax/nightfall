@@ -1,4 +1,4 @@
-Nightfall for Steam Frame (preview)
+Unofficial Steam Frame port of tB0nE's Nightfall (preview)
 
 An unofficial port of Nightfall (github.com/tB0nE/nightfall) to the Steam
 Frame: your PC's screen as a big virtual screen, in 2D or 3D. Nightfall
