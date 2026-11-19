@@ -93,7 +93,7 @@ All of this is tB0nE's work, and it works in this port:
 
 I can't recommend tB0nE's Nightfall and Meteor enough. It was the one app
 that kept me going back to my Quest, before I started on this port and
-before the original's own Frame preview was announced. The interface, the
+before tB0nE's own Frame preview was announced. The interface, the
 full keyboard and, to my eyes, the most convincing 3D I had seen from a
 desktop streaming app are why I began.
 
