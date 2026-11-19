@@ -10,8 +10,7 @@ AI 3D, Meteor and the menus all come from the original, and this port only
 adapts them to the Frame and adds a few things on top. The original
 project is where Nightfall is developed, and it has an experimental Steam
 Frame build of its own. This port is a separate effort alongside it, not a
-replacement for it, so questions and problems about this port belong here
-and not with tB0nE. It is free software under the same license, the GNU
+replacement for it. It is free software under the same license, the GNU
 General Public License, version 3. The original project's own README is
 kept here as [README-original.md](README-original.md).
 
@@ -428,9 +427,7 @@ About > **Logging** > On, exit Nightfall, start it again, repeat the
 problem. Then open an issue at
 <https://github.com/Wrexlax/nightfall/issues>, say what happened, and
 attach `~/Downloads/Nightfall-logs/nightfall-latest.log`. That copy is
-cleaned for sharing (addresses, names, ids and keys are masked). Problems
-with this port are this port's to fix, so please report them here and not
-to the original project.
+cleaned for sharing (addresses, names, ids and keys are masked).
 
 Meteor's log (its menu > **Open log**) is cleaned as it is written. Logs
 from an older Meteor, and the streaming host's own log, are not: look

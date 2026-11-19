@@ -113,8 +113,7 @@ named  logging-on  in ~/Games/NightfallFrame/ and start it again (delete the
 file to go back to the menu's choice).
 
 Source code, newer builds and where to report a problem:
-https://github.com/Wrexlax/nightfall (problems: its Issues page). Please
-report problems with this port there, not to the original project.
+https://github.com/Wrexlax/nightfall (problems: its Issues page).
 
 Logs to send with a report:
 - ~/Downloads/Nightfall-logs/nightfall-latest.log (the current or last run)
