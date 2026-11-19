@@ -3,8 +3,11 @@
 A running list for the original developer and for anyone comparing this port
 with upstream, offered in case it is useful. It covers problems that aren't
 specific to the Frame: they turned up while porting and are in upstream
-Nightfall or Meteor too. Add to it whenever a build fixes something that
-isn't Frame-specific. The build or
+Nightfall or Meteor too. The original's author knows this code far better
+than this port does, may already have fixed some of these, and may have good
+reasons for others; where an entry names a cause, that is this port's
+reading of the source and could be mistaken. Add to it whenever a build
+fixes something that isn't Frame-specific. The build or
 Meteor revision that carries the fix is in brackets.
 
 "Upstream" is tB0nE/nightfall; the port sits on its 0.9.0 tag.
@@ -103,12 +106,12 @@ this tree has them too.
   a later launch's probe gets no answer, so `meteor_address()` is not empty for
   a stream that went straight to the host. [7z]
 
-## Meteor (the PC helper): Quest users have these too
+## Meteor (the PC helper): not specific to the Frame
 
 - **Sound stopped after about 30 seconds of PC silence and did not return.**
   Meteor's UDP relay closed a flow after 30 s without host traffic. It now
-  closes a flow only when the client is quiet too. Upstream's 0.9.0 still has
-  the fault. Meteor announces the fix as `quiet-flows`. [Meteor 0.1.2,
+  closes a flow only when the client is quiet too. Upstream's 0.9.0 has it;
+  0.9.1 fixed it there (commit b7dc8c4). Meteor announces the fix as `quiet-flows`. [Meteor 0.1.2,
   0.9.0-sf1]
 - **The headset microphone was written to the left channel only.** Announced
   as `mic-stereo`. [Meteor 0.1.3, 0.9.0-sf1]
@@ -227,7 +230,7 @@ on Quest as well.
 - A connection timeout that was not cancelled when pairing started. Fixed in
   the port on 0.8.1 (APK fix2); not confirmed whether 0.9 still needs it.
 - Typed text with non-ASCII characters cut short (a UTF-8 byte length). Fixed
-  with voice typing [3s]; not confirmed that the fault was upstream's.
+  with voice typing [3s]; not confirmed that it came from upstream.
 - A screen drawn in the 3D scene under Godot's Mobile renderer passes
   through a 10-bit linear buffer with twice the range: 8-bit tones below
   about 40 come out as only 12 levels (bands in shadows). The Frame build

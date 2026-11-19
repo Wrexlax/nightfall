@@ -4,12 +4,16 @@ Your PC's screen as a big virtual screen in the Steam Frame, in 2D or 3D,
 running as a native SteamOS app.
 
 This is an **unofficial port** of [Nightfall](https://github.com/tB0nE/nightfall)
-by tB0nE. It is a separate project from the original, which has an
-experimental Steam Frame build of its own: this is not that one. Questions
-and problems about this port belong here, not with tB0nE. It is free
-software under the same license, the GNU General Public License, version 3.
-The original project's own README is kept here as
-[README-original.md](README-original.md).
+by tB0nE, made by a Steam Frame owner who wanted to use Nightfall on that
+headset. Nightfall is tB0nE's work: the streaming, the virtual screen,
+AI 3D, Meteor and the menus all come from the original, and this port only
+adapts them to the Frame and adds a few things on top. The original
+project is where Nightfall is developed, and it has an experimental Steam
+Frame build of its own. This port is a separate effort alongside it, not a
+replacement for it, so questions and problems about this port belong here
+and not with tB0nE. It is free software under the same license, the GNU
+General Public License, version 3. The original project's own README is
+kept here as [README-original.md](README-original.md).
 
 It is a **preview**: it is built on Nightfall 0.9, and it has been tested
 on a single Steam Frame with a single Windows PC (an RTX 5090) so far. It
@@ -22,7 +26,7 @@ There are two parts:
 - **Nightfall Meteor** on the PC (`Nightfall-Meteor-…-SteamFrame-Setup-x64.exe`).
   Optional, but most of what makes this port good needs it.
 
-## Why this version
+## What this port does
 
 - **Native on SteamOS.** A SteamOS app, not the Android app running through
   the Frame's Android support. Hardware video decoding, SteamVR's own
@@ -43,7 +47,7 @@ There are two parts:
   or saved. Say a menu button's name instead ("bezel off", "head lock",
   "curve 40") and Nightfall does it: every button is a voice command, in 20
   languages.
-- **A real keyboard, not a toy one.** Full size: Esc and all twelve F keys,
+- **A full-size keyboard.** Esc and all twelve F keys,
   Tab, Caps, Ctrl, Alt and the Windows key, plus a row of one-press
   shortcuts (Copy, Paste, Undo, Alt+Tab, Task Manager, Ctrl+Alt+Del and
   more). Shift, Ctrl and Alt work like a phone's: one press for the next
@@ -325,10 +329,11 @@ differs: these were measured with one PC (an RTX 5090).
 
 ## Fixed along the way
 
-Problems found and fixed while porting. Many of them aren't specific to
-the Frame, so they are written up with their causes in
-`steam-frame/UPSTREAM-FIXES.md` in the source, in case they are useful to
-the original project.
+Using Nightfall every day on a new headset turned up a few rough spots,
+as a new device always does. They are fixed in this port. Many aren't
+specific to the Frame, so they are written up with their causes in
+`steam-frame/UPSTREAM-FIXES.md` in the source, in case any of it is useful
+to the original project, which has since fixed some of them itself.
 
 **In Meteor (this port's build):**
 
@@ -450,9 +455,12 @@ On the PC: Windows Settings > Apps > Nightfall Meteor > Uninstall.
 This port is other people's work put together and adapted. With thanks to:
 
 - **[Nightfall](https://github.com/tB0nE/nightfall) and Nightfall Meteor**
-  by tB0nE: everything this port stands on. The port began with tB0nE's
+  by tB0nE. This port is Nightfall: nearly everything in it is tB0nE's
+  design and code, published under a license that lets others build on it.
+  The port began with tB0nE's
   [remark](https://reddit.com/r/virtualreality/s/5bL9sd3tce) that someone
-  with a Steam Frame could take the source and add support for it.
+  with a Steam Frame could take the source and add support for it. Thank
+  you for Nightfall, and for the nudge.
 - **[Moonlight XR for Frame](https://github.com/simplysanatori/moonlight-xr-steam-frame)**:
   the hardware video decoder and the small script the installer uses to
   add Nightfall to your Steam library are that project's code, and this

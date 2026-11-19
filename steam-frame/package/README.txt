@@ -1,8 +1,9 @@
 Nightfall for Steam Frame (preview)
 
 An unofficial port of Nightfall (github.com/tB0nE/nightfall) to the Steam
-Frame: your PC's screen as a big virtual screen, in 2D or 3D. It is a
-separate project from the original. Free software, GNU GPL version 3.
+Frame: your PC's screen as a big virtual screen, in 2D or 3D. Nightfall
+is tB0nE's work; this port adapts it to the Frame and is a separate project
+from the original. Free software, GNU GPL version 3.
 
 In this folder:
 - install.sh     double-click this to install or update (step 2 below)
