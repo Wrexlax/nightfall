@@ -325,9 +325,10 @@ differs: these were measured with one PC (an RTX 5090).
 
 ## Fixed along the way
 
-Faults found while porting, most of them in the original as well. The full
-list, written for the original's author, is `steam-frame/UPSTREAM-FIXES.md`
-in the source.
+Problems found and fixed while porting. Many of them aren't specific to
+the Frame, so they are written up with their causes in
+`steam-frame/UPSTREAM-FIXES.md` in the source, in case they are useful to
+the original project.
 
 **In Meteor (this port's build):**
 
@@ -394,11 +395,12 @@ in the source.
 - **Two different Meteors.** This port comes with its own build of
   Nightfall Meteor (its version ends in `-sf`, like 0.9.0-sf19), and that
   is the one everything in this README describes. The *original* Nightfall
-  Meteor from tB0nE (0.9.1 or later) also works with this headset build,
-  with less: its Multi-Link carries picture and sound over both links but
-  not the controls, microphone or depth, and it has no Adapter first, no
-  media keys, no pairing window and no Stream Link choice in its menu. Run
-  only one of the two at a time.
+  Meteor from tB0nE (0.9.1 or later) also works with this headset build:
+  its Multi-Link carries picture and sound over both links. A few things
+  described here need this port's Meteor: controls, microphone and depth
+  over both links, Adapter first, the media keys, the pairing window and
+  the Stream Link choice in Meteor's menu. Run only one of the two at a
+  time.
 - **Beside the original's Steam Frame build.** This port keeps its settings
   in a folder of its own, so both can be installed on one headset without
   one starting with the other's settings.
@@ -421,8 +423,9 @@ About > **Logging** > On, exit Nightfall, start it again, repeat the
 problem. Then open an issue at
 <https://github.com/Wrexlax/nightfall/issues>, say what happened, and
 attach `~/Downloads/Nightfall-logs/nightfall-latest.log`. That copy is
-cleaned for sharing (addresses, names, ids and keys are masked). Please
-don't take problems with this port to the original's author.
+cleaned for sharing (addresses, names, ids and keys are masked). Problems
+with this port are this port's to fix, so please report them here and not
+to the original project.
 
 Meteor's log (its menu > **Open log**) is cleaned as it is written. Logs
 from an older Meteor, and the streaming host's own log, are not: look
@@ -474,8 +477,8 @@ This port is other people's work put together and adapted. With thanks to:
 The source code of both parts is at <https://github.com/Wrexlax/nightfall>,
 published with each release as the GPL requires. `steam-frame/CHANGELOG.md`
 in it lists every build,
-`steam-frame/UPSTREAM-FIXES.md` lists faults found in the original along
-the way, for its author, and `steam-frame/engine/README.md` says how the
+`steam-frame/UPSTREAM-FIXES.md` lists the fixes that may be useful to the
+original project, and `steam-frame/engine/README.md` says how the
 engine build differs from Godot's own.
 
 The Meteor Setup includes the original's own streaming host (tB0nE's build

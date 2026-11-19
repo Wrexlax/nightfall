@@ -1,9 +1,10 @@
-# Faults in the original Nightfall found while porting to the Steam Frame
+# Fixes from the Steam Frame port that may be useful to the original Nightfall
 
 A running list for the original developer and for anyone comparing this port
-with upstream. It is about things that were wrong or weak in upstream
-Nightfall or Meteor themselves, not about what the Frame needed. Add to it
-whenever a build fixes something that isn't Frame-specific. The build or
+with upstream, offered in case it is useful. It covers problems that aren't
+specific to the Frame: they turned up while porting and are in upstream
+Nightfall or Meteor too. Add to it whenever a build fixes something that
+isn't Frame-specific. The build or
 Meteor revision that carries the fix is in brackets.
 
 "Upstream" is tB0nE/nightfall; the port sits on its 0.9.0 tag.
@@ -191,7 +192,7 @@ this tree has them too.
   "don't update" while not shown (`src/frame_session_watch.gd`, Frame only).
   The engine itself is unchanged. [8a]
 
-## Weak in the original, fixed on the Frame only so far
+## In the original too, fixed on the Frame only so far
 
 The fix exists but is switched on for the Steam Frame alone. Each would help
 on Quest as well.

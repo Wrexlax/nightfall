@@ -1,8 +1,8 @@
 # Nightfall for Steam Frame: change log
 
 Every build of the port, newest first. One entry per build that was handed
-over for testing; add the next one at the top. Faults that belong to the
-original Nightfall or Meteor are also listed in `UPSTREAM-FIXES.md`.
+over for testing; add the next one at the top. Fixes that also apply to
+the original Nightfall or Meteor are listed in `UPSTREAM-FIXES.md` as well.
 
 Builds 5a onward sit on upstream Nightfall 0.9.0 (branch `frame-0.9`).
 Builds up to 4i sat on 0.8.1 (branch `steam-frame-native`).
@@ -281,8 +281,8 @@ Headset only; Meteor stays 0.9.0-sf18 (built and running on the PC).
 - **Meteor now checks at start that its host's login is the one in
   `host.toml` and sets it again when it isn't** (`meteor/src/host/mod.rs`,
   `login_differs`: user name, salt and SHA-256 as the host stores them).
-  A login file it can't read that way is left alone. Upstream has the
-  same fault; see `UPSTREAM-FIXES.md`.
+  A login file it can't read that way is left alone. Upstream behaves
+  the same way; see `UPSTREAM-FIXES.md`.
 - By hand, for a Meteor without this: empty the password in `host.toml`
   (`password = ""`) and restart Meteor; it then makes a new one and sets
   it on the host.
@@ -308,7 +308,7 @@ seemed to do nothing, and the process needed explaining in detail.
   of everything: the PIN, "If that is the PIN you see in your headset,
   choose Yes", Yes / No. Until now there was only a notification, which
   Windows holds back during full-screen programs and Do Not Disturb, and
-  the tray menu's "Approve pairing", which nobody knows to look for. Both
+  the tray menu's "Approve pairing", which is easy to miss. Both
   remain. `meteor/src/desktop_windows.rs` (`ask_to_pair`). **Not compiled
   here and never run**: it is one call to Windows' own message box, whose
   signature was read in the windows-sys documentation.
@@ -1330,7 +1330,7 @@ of faults from that day.
   throughout, off before), and listening again after a pause, the 7t fix for
   cut-off sentences, costs about as much each time. Nothing changed in how it
   transcribes yet: this build measures.
-- Meteor's log: one more fault of the original noted in `UPSTREAM-FIXES.md`
+- Meteor's log: one more thing noted for the original in `UPSTREAM-FIXES.md`
   (the "video tap" line repeating and wrapping).
 - Known, left as it is: the tick in Meteor's tray menu doesn't move while
   the menu is open (close and reopen it).
@@ -2013,7 +2013,7 @@ From the first trial of the Screens tab.
 - **Picking a layout no longer removes the virtual screens.** Pressing Apply
   with the same number of virtual monitors (a different layout picture, or
   nothing changed) took every virtual screen away, and only changing their
-  number brought them back. A fault in the original.
+  number brought them back. The original does this too.
 - **Curved screens show their own monitor.** With more than one screen, each
   curved screen showed the whole stream (every monitor side by side).
 - **Voice typing: a runaway repeat is cut.** A one-second clip once came back
@@ -2340,7 +2340,7 @@ From the first trial of the Screens tab.
 - Lighter Fast filter, second pass (no measurable gain).
 
 ### 5m (2026-11-14)
-- A resting controller really stops pointing (upstream fault since 0.9).
+- A resting controller really stops pointing (the same in upstream since 0.9).
 - Sleep When Put Down only applies with PC Cursor or Cursor Follow.
 
 ### 5l (2026-11-14, not tested on its own)
