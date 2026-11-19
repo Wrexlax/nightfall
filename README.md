@@ -1,13 +1,14 @@
-# Nightfall for Steam Frame (preview)
+# Nightfall for Steam Frame (unofficial port, preview)
 
 Your PC's screen as a big virtual screen in the Steam Frame, in 2D or 3D,
 running as a native SteamOS app.
 
 This is an **unofficial port** of tB0nE's
 [Nightfall](https://github.com/tB0nE/nightfall), made by a Steam Frame
-owner who wanted to use it on their headset. Nightfall is tB0nE's work: the streaming, the virtual screen,
-AI 3D, Meteor and the menus all come from the original, and this port only
-adapts them to the Frame and adds a few things on top. The original
+owner who wanted to use it on their headset. Nightfall is tB0nE's work:
+the streaming, the virtual screen, AI 3D, Meteor and the menus all come
+from the original, and this port only adapts them to the Frame and adds a
+few things on top. The original
 project is where Nightfall is developed, and it has an experimental Steam
 Frame build of its own. This port is a separate effort alongside it, not a
 replacement for it. It is free software under the same license, the GNU
@@ -23,11 +24,15 @@ There are two parts:
 
 - **Nightfall** on the headset (`NightfallFrame-….tar.gz`).
 - **Nightfall Meteor** on the PC (`Nightfall-Meteor-…-SteamFrame-Setup-x64.exe`).
-  Optional, but most of what makes this port good needs it.
+  Optional, but many of the features below need it.
 
-## What this port does
+## What you get
 
-- **Native on SteamOS.** A SteamOS app, not the Android app running through
+Much of this is Nightfall itself, which had already done the hard part:
+the streaming, the virtual screens, AI 3D and Meteor. The rest was added
+or adapted for the Frame.
+
+- **Native on SteamOS.** A SteamOS app of its own, so it doesn't go through
   the Frame's Android support. Hardware video decoding, SteamVR's own
   controller models, and a display rate that follows the stream: 72, 90,
   120 or 144 Hz. (The original project now has an experimental native
@@ -56,8 +61,9 @@ There are two parts:
   headset, or Windows' dictation on the PC, whichever you set.
 - **Looks after your eyes and your battery.** Eye-tracked foveation for
   large curved screens, curved or flat screens, passthrough with an
-  adjustable fade, and settings measured for battery life (about 76 minutes
-  at 90 Hz with Meteor's depth in our test).
+  adjustable fade, and starting settings chosen with the battery in mind
+  (about 76 minutes at 90 Hz with Meteor's depth, worked out from the power
+  it drew, not run down to empty).
 - **Passthrough that keeps up with a color camera.** With a color camera
   add-on fitted (Arcturus Vision is the one it was built with), Nightfall
   notices when that camera is showing the room and drops to 90 fps by
@@ -85,13 +91,14 @@ There are two parts:
   save the sets as profiles. Put the menu and keyboard where you like them
   and make that the default.
 - **Several screens.** Show more than one of your PC's monitors, or add
-  virtual ones (with Meteor's built-in host).
-- **Pairing you can't miss.** Meteor opens a window on the PC that asks
-  "pair this headset?" with the PIN. One click.
-- **Private by design.** Logging is off until you turn it on, the log you
+  virtual ones. This needs Meteor's built-in host.
+- **Pairing you can't miss.** Meteor opens a window on the PC that shows
+  the PIN and asks you to confirm it. One click.
+- **Logs that are safe to share.** Logging is off until you turn it on, the log you
   share is cleaned of addresses and names, and so is Meteor's.
-- **In your language.** Menus, tooltips and voice commands in 20 languages
-  (first drafts, not yet checked by native speakers).
+- **In your language.** Nightfall's menus come in 20 languages. What this
+  port added to them, and its voice commands, are first drafts that native
+  speakers have not checked yet.
 
 ## What you need
 
@@ -106,7 +113,7 @@ There are two parts:
 - For the headset's microphone on the PC, and for Game Controller mode:
   two small free drivers on the PC, which Meteor's Setup does not install.
   See "Two extras on the PC" below.
-- The stream uses H.264 or HEVC. The Frame has no AV1 hardware decoding.
+- The stream uses H.264 or HEVC. This port's video decoder does not do AV1.
 
 ## Install on the headset
 
@@ -298,15 +305,17 @@ differs: these were measured with one PC (an RTX 5090).
 
 | Stream | 3D made by | What it held |
 | --- | --- | --- |
-| Up to 1440p at 90 fps (how it comes) | the headset or Meteor | 90 |
+| Up to 1440p at 90 fps (90 is what it starts with) | the headset or Meteor | 90 |
 | 1080p at 144 fps | the headset | 144 most of the time; 125 in the slowest second |
 | 1440p at 144 fps | the headset | 67 to 107: too much, and SteamVR halves the rate |
 | Any, with a color camera add-on showing the room | either | 90 (Nightfall switches to it by itself) |
 
 - Nightfall starts at **90 fps**. It is the setting that held everywhere it
-  was tried, and the easiest on the battery (about 76 minutes with Meteor's
-  depth in our test). **FPS** is on the Stream tab.
-- For **144**, use a 1080p stream, or let Meteor make the 3D on the PC.
+  was tried, and it is easier on the battery than 144 (about 76 minutes
+  with Meteor's depth, worked out from the power it drew). **FPS** is on
+  the Stream tab.
+- For **144**, use a 1080p stream. Whether 1440p holds 144 with Meteor
+  making the 3D has not been measured with this build.
 - **With a color camera add-on and Camera FPS Limit off:** at the camera's
   5K setting, 144 hitches (about 104 fps, with dips to 78, in our test).
   With the camera at 2.5K it held about 140, with dips to about 120. How to
@@ -326,51 +335,44 @@ differs: these were measured with one PC (an RTX 5090).
 - If the picture turns choppy all at once, SteamVR has probably halved the
   rate because the headset fell behind: lower FPS or Resolution one step.
 
-## Fixed along the way
+## Smoothed along the way
 
 Using Nightfall every day on a new headset turned up a few rough spots,
-as a new device always does. They are fixed in this port. Many aren't
-specific to the Frame, so they are written up with their causes in
+as a new device always does. This is how those now behave in this port.
+Many aren't specific to the Frame, so the details are written up in
 `steam-frame/UPSTREAM-FIXES.md` in the source, in case any of it is useful
-to the original project, which has since fixed some of them itself.
+to the original project. The original has since taken care of at least
+the sound one itself, in its 0.9.1.
 
 **In Meteor (this port's build):**
 
-- **Sound that stopped and never came back** after about 30 seconds of
-  silence on the PC.
-- **The headset microphone** reached Windows on the left channel only, and
-  could cut out about half a minute into a recording.
-- **Pairing.** A request was announced only by a Windows notification,
-  which is easy to miss; Meteor now asks in a window. And after a second
-  copy of Meteor had been run on the same PC, approving a request failed
-  with "Cannot submit the PIN"; Meteor now repairs that when it starts.
-- **TensorRT for every recent NVIDIA card.** On Windows the download of the
-  faster depth engine was refused on everything but the RTX 30 series. It
-  is now allowed on every generation NVIDIA makes that engine for; so far
-  it has run on RTX 30 and RTX 50.
-- **"Host depth is OFF" can't be missed.** With that item unticked in
-  Meteor's menu, Meteor's depth silently disappeared from the headset's
-  choices. Meteor's menu now says so on its second line, and Nightfall
-  tells you when the stream starts.
-- **Media keys** (mute, volume, play/pause) arrived in Windows as letters.
-- **Meteor's log** no longer holds your addresses or your Windows user
+- **Sound** carries on after the PC has been silent for a while.
+- **The headset microphone** reaches Windows on both channels and keeps
+  going through a long recording.
+- **Pairing.** Meteor asks in a window on the PC, and approving still works
+  after another copy of Meteor has been run on the same PC.
+- **TensorRT for every recent NVIDIA card.** On Windows the faster depth
+  engine can be downloaded for every generation NVIDIA makes it for; so
+  far it has run on RTX 30 and RTX 50.
+- **"Host depth is OFF" is easy to see.** When that item is unticked in
+  Meteor's menu, the menu says so on its second line and Nightfall tells
+  you when the stream starts.
+- **Media keys** (mute, volume, play/pause) reach Windows as media keys.
+- **Meteor's log** is written without your addresses or your Windows user
   name.
 
 **On the headset:**
 
-- **The pause buzz.** Pausing a video on the PC left the last moment of
-  sound repeating in the headset.
-- **Meteor's depth that took minutes to start** after Host depth was
-  switched on in the middle of a stream.
-- **The list of PCs.** A saved PC now shows its name, can be renamed, and
-  can be removed by itself (before: an address only, and one button that
-  forgot them all). Two hosts on one PC no longer share their settings.
+- **Pausing a video** on the PC leaves the headset quiet.
+- **Meteor's depth** starts within seconds when Host depth is switched on
+  in the middle of a stream.
+- **The list of PCs.** A saved PC shows its name, can be renamed, and can
+  be removed by itself. Two hosts on one PC keep their own settings.
 - **The address field.** Point into the middle of an address and the
   keypad types there; highlight part of it and the next key replaces it.
-- **Connect pressed while Nightfall was already connecting** failed both
-  attempts ("Another stream operation is still running").
-- **A screen could be resized until its corners were out of sight**, with
-  no way back.
+- **Connect** can be pressed while Nightfall is already connecting without
+  upsetting the connection.
+- **A screen** can't be resized so far that its corners are out of reach.
 
 ## Known limits
 
@@ -382,8 +384,8 @@ to the original project, which has since fixed some of them itself.
   make Meteor prove its identity. Don't use Stream Link on a network you
   share with people you don't trust.
 - **1440p at 144 Hz with 3D made on the headset** is more than the headset
-  can hold; SteamVR halves the frame rate. Use 1080p, or 90 Hz, or Meteor's
-  depth.
+  can hold; SteamVR halves the frame rate. Use 1080p or 90 Hz. With
+  Meteor's depth it may hold; that has not been measured with this build.
 - **Mesh Wi-Fi.** Where your Wi-Fi hands over between mesh units the
   picture can stop for one to three seconds, and now and then for much
   longer. Stream Link helps while the adapter is in reach.
@@ -439,8 +441,8 @@ afterwards and attach the archive it makes.
 
 ## Uninstall
 
-On the headset: double-click `uninstall.sh` in `~/Games/NightfallFrame`. It asks first,
-and asks separately about the speech models and about your settings.
+On the headset: double-click `uninstall.sh` in `~/Games/NightfallFrame`.
+It asks first, and asks separately about the speech models and about your settings.
 **Saying yes to settings also removes your button mappings and PC
 pairings.** `WHERE-THINGS-ARE.txt` in the same folder lists every place
 Nightfall keeps files.
