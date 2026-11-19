@@ -1,4 +1,4 @@
-# Unofficial Steam Frame port of tB0nE's Nightfall (preview)
+# Unofficial Steam Frame port of tB0nE's Nightfall (early release)
 
 Your PC's screen as a big virtual screen in the Steam Frame, in 2D or 3D,
 running as a native SteamOS app.
@@ -15,7 +15,7 @@ replacement for it. It is free software under the same license, the GNU
 General Public License, version 3. The original project's own README is
 kept here as [README-original.md](README-original.md).
 
-It is a **preview**: it is built on Nightfall 0.9, and it has been tested
+It is an **early release**: it is built on Nightfall 0.9, and it has been tested
 on a single Steam Frame with a single Windows PC (an RTX 5090) so far. It
 is used daily there and works well. On another setup something may behave
 differently; if it does, please report it.
