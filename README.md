@@ -536,7 +536,10 @@ before you share those.
 
 For trouble that looks like SteamOS's (Steam's menu appearing, sound, the
 display), run `bash ~/Games/NightfallFrame/collect-steamos-logs.sh` right
-afterwards and attach the archive it makes.
+afterwards and attach the archive it makes. The script cleans its copies
+the same way (addresses, names, Steam account and device ids). SteamOS's
+own logs are large and varied, so it is still worth a look through the
+archive before you share it.
 
 ## Uninstall
 
