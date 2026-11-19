@@ -443,9 +443,10 @@ the sound one itself, in its 0.9.1.
   going through a long recording.
 - **Pairing.** Meteor asks in a window on the PC, and approving still works
   after another copy of Meteor has been run on the same PC.
-- **TensorRT for every recent NVIDIA card.** On Windows the faster depth
-  engine can be downloaded for every generation NVIDIA makes it for; so
-  far it has run on RTX 30 and RTX 50.
+- **TensorRT on more NVIDIA cards.** Meteor's faster TensorRT depth engine
+  is tB0nE's. This port only added checksums so that its download also
+  works for more NVIDIA generations, RTX 20 to RTX 50. So far it has run
+  on RTX 30 and RTX 50.
 - **"Host depth is OFF" is easy to see.** When that item is unticked in
   Meteor's menu, the menu says so on its second line and Nightfall tells
   you when the stream starts.
