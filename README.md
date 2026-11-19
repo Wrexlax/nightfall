@@ -119,8 +119,10 @@ Link and PC VR games through Meteor.
   menu.
 - **Voice typing and voice commands.** Hold a button and speak, and what
   you say is typed on your PC. Say a menu button's name ("depth view",
-  "head lock", "curve 40") and Nightfall does it. It runs on the headset;
-  nothing you say is sent anywhere or saved.
+  "head lock", "curve 40") and Nightfall does it. Say a PC shortcut
+  ("show desktop", "switch window", "copy", "screenshot") and Nightfall
+  presses those keys on the PC for you. It runs on the headset; nothing
+  you say is sent anywhere or saved.
 - **More on the keyboard.** Tabs that swap the original's trackpad for
   arrows, a number pad, media keys or Windows shortcuts; Shift, Ctrl and
   Alt that work like a phone's (one press for the next key, two to lock);
