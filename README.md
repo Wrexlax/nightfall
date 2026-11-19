@@ -202,6 +202,7 @@ There are two parts to install:
 ## Install on the headset
 
 1. On the Frame, switch to the desktop, download `NightfallFrame-….tar.gz`
+   from the [releases page](https://github.com/Wrexlax/nightfall/releases)
    and unpack it (right-click > Extract), for example in Downloads.
 2. Open the unpacked `NightfallFrame` folder, **double-click `install.sh`**
    and choose **Launch** when asked. Steam has to be running.
@@ -222,7 +223,9 @@ chosen your own. If double-clicking does nothing, open Konsole and type
 
 ## Install Meteor on the PC (optional, recommended)
 
-1. Run `Nightfall-Meteor-…-SteamFrame-Setup-x64.exe`. It is not signed, so
+1. Download `Nightfall-Meteor-…-SteamFrame-Setup-x64.exe` from the
+   [releases page](https://github.com/Wrexlax/nightfall/releases) and run
+   it. It is not signed, so
    Windows shows "Windows protected your PC": choose **More info**, then
    **Run anyway**. To be sure the file is the one that was published,
    compare its SHA-256 with `SHA256SUMS.txt` beside the downloads (in
