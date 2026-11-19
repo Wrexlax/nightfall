@@ -152,11 +152,11 @@ Link and PC VR games through Meteor.
   them and make that the default.
 - **Color camera handling.** Nightfall can tell when a color camera add-on
   is showing the room (Arcturus Vision is the one on the headset this port
-  was built with). With Passthrough on it then drops to 90 fps by itself,
-  which is what the headset can hold with 5K passthrough, and returns to
-  your own FPS when Passthrough goes off or the headset switches to its
-  own cameras. It warns you five seconds ahead, because the stream
-  reloads briefly.
+  was built with). When color passthrough comes on, Nightfall drops to
+  90 fps by itself, which is what the headset can hold with 5K
+  passthrough. When it goes off, or the headset switches over to its own
+  cameras, Nightfall returns to a higher FPS if you have set one. It warns
+  you five seconds ahead, because the stream reloads briefly.
 - **Eye-tracked foveation** for large curved screens.
 - **A pairing request that's hard to miss.** The original's Meteor tells
   you about a pairing request with a Windows notification. This port's
