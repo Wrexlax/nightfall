@@ -470,12 +470,13 @@ the sound one itself, in its 0.9.1.
 ## Known limits
 
 - **One tester.** One headset, one PC, one home network.
-- **Stream Link is for home networks.** Meteor only sends its extra copy of
-  the stream to home-network addresses, but two checks are still to come:
-  a request to open a second link could in theory be replayed by someone
-  already on your network who recorded it, and the headset does not yet
-  make Meteor prove its identity. Don't use Stream Link on a network you
-  share with people you don't trust.
+- **Stream Link is made for a home network you trust.** This port's
+  Meteor only sends its second copy of the stream to addresses on your own
+  network, and only in answer to a request that carries that stream's own
+  secret. Two further protections are planned for this port's Stream Link
+  (see Planned). They would only matter if someone already on your network
+  were deliberately trying to interfere. On a network you share with
+  strangers, set Stream Link to Wi-Fi only.
 - **1440p at 144 Hz with 3D made on the headset** is more than the headset
   can hold; SteamVR halves the frame rate. Use 1080p or 90 Hz. With
   Meteor's depth it may hold; that has not been measured with this build.
@@ -511,7 +512,9 @@ the sound one itself, in its 0.9.1.
 
 - **Profiles that follow the game:** the button profile switching by
   itself with the game you start on the PC.
-- The two remaining Stream Link safety checks.
+- Two more protections for this port's Stream Link: making a second-link
+  request impossible to reuse, and having Meteor prove its identity to
+  the headset.
 - A menu and keyboard that keep their place the way SteamOS's own do when
   the screen is pushed far away. This port has an option for the menu and
   keyboard to follow the screen, but it could use some work.
