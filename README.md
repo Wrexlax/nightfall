@@ -157,7 +157,10 @@ Link and PC VR games through Meteor.
   passthrough. When it goes off, or the headset switches over to its own
   cameras, Nightfall returns to a higher FPS if you have set one. It warns
   you five seconds ahead, because the stream reloads briefly.
-- **Eye-tracked foveation** for large curved screens.
+- **Eye-tracked foveation** for large curved screens. It uses the Steam
+  Frame's own eye tracking and SteamVR's foveated rendering, so what you
+  look at stays sharp while the edges of your view cost less to draw.
+  Where you look is never logged.
 - **A pairing request that's hard to miss.** The original's Meteor tells
   you about a pairing request with a Windows notification. This port's
   Meteor also opens a window in front of everything with the PIN.
