@@ -3,102 +3,181 @@
 Your PC's screen as a big virtual screen in the Steam Frame, in 2D or 3D,
 running as a native SteamOS app.
 
+> Already know Nightfall? Skip to [what this port adds](#what-this-port-adds),
+> [the numbers](#the-numbers) or [install](#install-on-the-headset).
+
 This is an **unofficial port** of tB0nE's
 [Nightfall](https://github.com/tB0nE/nightfall), made by a Steam Frame
-owner who wanted to use it on their headset. Nightfall is tB0nE's work:
-the streaming, the virtual screen, AI 3D, Meteor and the menus all come
-from the original, and this port only adapts them to the Frame and adds a
-few things on top. The original
-project is where Nightfall is developed, and it has an experimental Steam
-Frame build of its own. This port is a separate effort alongside it, not a
-replacement for it. It is free software under the same license, the GNU
-General Public License, version 3. The original project's own README is
-kept here as [README-original.md](README-original.md).
+owner who wanted to use it on their headset. Nightfall is tB0nE's work,
+and this port only adapts it to the Frame and adds a few things on top.
+The original project is where Nightfall is developed, and it has an
+experimental Steam Frame build of its own. This port is a separate effort
+alongside it, not a replacement for it. It is free software under the same
+license, the GNU General Public License, version 3. The original project's
+own README is kept here as [README-original.md](README-original.md).
 
-It is an **early release**: it is built on Nightfall 0.9, and it has been tested
-on a single Steam Frame with a single Windows PC (an RTX 5090) so far. It
-is used daily there and works well. On another setup something may behave
-differently; if it does, please report it.
+It is an **early release**: it is built on Nightfall 0.9, and it has been
+tested on a single Steam Frame with a single Windows PC (an RTX 5090) so
+far. It is used daily there and works well. On another setup something may
+behave differently; if it does, please report it.
 
-There are two parts:
+## What is Nightfall?
+
+Nightfall, by tB0nE, puts your PC's desktop and games on big screens that
+float in your headset. You place them anywhere, curve them, resize them,
+and see your real room around them with passthrough. It can also turn an
+ordinary flat game or film into stereoscopic 3D as you watch.
+
+If you know Moonlight XR, it is the same family of app: your PC does the
+work, the headset shows it, and both can make that 3D on the headset
+itself. What sets Nightfall apart is Meteor.
+
+<details>
+<summary><b>How AI 3D works, briefly</b></summary>
+
+A neural network that has learned from a great many images looks at each
+frame and estimates, for every part of the picture, how near or far it is.
+That gives a depth map. Nightfall then shifts the picture slightly
+differently for each eye according to that depth, and your brain reads the
+result as 3D. The depth is a best guess, not a measurement, which is why
+it is impressive most of the time and now and then odd around fine edges.
+More on the general idea:
+[2D to 3D conversion](https://en.wikipedia.org/wiki/2D_to_3D_conversion)
+on Wikipedia.
+
+</details>
+
+### Meteor
+
+Nightfall Meteor is tB0nE's optional helper for the PC. It isn't required
+to use Nightfall, but in my opinion it is the beating heart of Nightfall
+and what makes the project so good.
+
+It sits between the headset and the streaming host, which lets the host,
+Windows and the headset talk to each other in ways they otherwise can't.
+Its most useful feature is making the 3D depth on the PC's graphics card
+and sending it to the headset alongside the picture:
+
+- **Depth that keeps up.** In this port's tests Meteor delivered 40 to 65
+  depth maps a second, where the headset's own models run at about 20.
+- **Bigger models on cards that can run them.** On supported graphics
+  cards Meteor can run Video Depth Anything, a larger model that follows
+  motion over time, accelerated with NVIDIA's TensorRT.
+- **A cooler, longer-lasting headset**, because it isn't doing that work
+  itself: a few degrees cooler and less power drawn in this port's tests.
+
+Meteor also makes the headset's microphone a PC input, for voice chat,
+recording or Windows' voice typing (on Windows this needs VB-CABLE, see
+[Two extras on the PC](#two-extras-on-the-pc)), and it brings a streaming
+host of its own, so there is nothing else to install.
+
+### Already in Nightfall
+
+All of this is tB0nE's work, and it works in this port:
+
+- **AI 3D**, using Nightfall's own EdgePad models, which tB0nE fine-tuned
+  from ZipDepth.
+- **Meteor** making the 3D on your PC, and the headset's microphone as a
+  PC input.
+- **Screens you grab, curve, resize and place anywhere**, with a bezel and
+  an ambient glow.
+- **Several screens**: your PC's monitors plus virtual ones (with Meteor's
+  built-in host).
+- **Passthrough with an adjustable fade**, so your room is as present as
+  you want it.
+- **A full-size keyboard** with a trackpad: Esc, all twelve F keys, and a
+  row of one-press shortcuts such as Alt+Tab and Ctrl+Alt+Del.
+- **Side-by-side 3D content**, gamepad layouts, and streams from 720p to
+  4K, from Sunshine, Apollo, Vibepollo and other compatible hosts.
+- **Menus in 21 languages.**
+
+I can't recommend tB0nE's Nightfall and Meteor enough. It was the one app
+that kept me going back to my Quest, before I started on this port and
+before the original's own Frame preview was announced. The interface, the
+full keyboard and, to my eyes, the most convincing 3D I had seen from a
+desktop streaming app are why I began.
+
+The original does more on Quest. Not in this port: its built-in browser
+and the PyroWave codec. Not tried in this port: hand tracking, HDR, USB
+Link and PC VR games through Meteor.
+
+## What this port adds
+
+- **A native SteamOS app for the Frame**, with hardware video decoding,
+  SteamVR's own controller models, and a display rate that follows the
+  stream: 72, 90, 120 or 144 Hz.
+- **3D made on the Frame itself.** The original makes 3D on the Quest; its
+  Frame preview relies on Meteor for now. This port can make it on the
+  Frame when there is no Meteor, with three models. Two are Moonlight XR's
+  and run on the headset's CPU. The third is tB0nE's own EdgePad, which
+  runs on the headset's GPU and takes the depth work off the CPU.
+- **Stream Link.** The original's newest preview also sends the picture
+  and sound over Wi-Fi and the Frame's wireless adapter together; the two
+  were built separately. This port's version carries the controls,
+  microphone and depth on both links as well, and has a choice of
+  Multi-Link, Adapter first or Wi-Fi only, in the headset or in Meteor's
+  menu.
+- **Voice typing and voice commands.** Hold a button and speak, and what
+  you say is typed on your PC. Say a menu button's name ("depth view",
+  "head lock", "curve 40") and Nightfall does it. It runs on the headset;
+  nothing you say is sent anywhere or saved.
+- **More on the keyboard.** Tabs that swap the original's trackpad for
+  arrows, a number pad, media keys or Windows shortcuts; Shift, Ctrl and
+  Alt that work like a phone's (one press for the next key, two to lock);
+  and a Mic key that starts voice typing, either Windows' own or this
+  port's on the headset.
+- **Grab the menu or the keyboard anywhere.** Any spot on them that isn't
+  a button moves them.
+- **Head Lock, with Level and Tilt.** The screen can follow your head,
+  staying level or tilting with it. On Quest, recentering and lying down
+  are taken care of by the headset's own system. On the Frame this port
+  does that part itself: Recenter puts the screen where you are looking,
+  including above you when you lie back.
+- **Controls that get out of the way.** The grab bar and its icons only
+  show while you point near them.
+- **A gamepad lock.** In Game Controller mode the grab bar shrinks to a
+  single icon so nothing gets pressed by mistake, and leaving the mode
+  takes a deliberate hold on it.
+- **A cursor that knows when you're holding the controller.** With Cursor
+  Follow on Capacitive Touch, the PC's cursor follows your pointer only
+  while your fingers are on the controller. Set a controller down and the
+  cursor stays where it was, and that controller's pointer ray switches
+  off by itself.
+- **Your own button layouts.** Choose what each controller button does on
+  the desktop, make your own gamepad or keyboard-and-mouse layouts for
+  games, and save them as profiles to switch between in the menu or by
+  saying the profile's name. Place the menu and keyboard where you like
+  them and make that the default.
+- **Color camera handling.** Nightfall can tell when a color camera add-on
+  is showing the room (Arcturus Vision is the one on the headset this port
+  was built with). With Passthrough on it then drops to 90 fps by itself,
+  which is what the headset can hold with 5K passthrough, and returns to
+  your own FPS when Passthrough goes off or the headset switches to its
+  own cameras. It warns you five seconds ahead, because the stream
+  reloads briefly.
+- **Eye-tracked foveation** for large curved screens.
+- **A pairing request that's hard to miss.** The original's Meteor tells
+  you about a pairing request with a Windows notification. This port's
+  Meteor also opens a window in front of everything with the PIN.
+- **Saved PCs by name** on the connection screen, each with Rename and
+  Remove.
+- **TensorRT for more of the NVIDIA family.** This port adds checksums so
+  that Meteor can download the faster TensorRT engine for more NVIDIA
+  generations, RTX 20 to RTX 50. Tried so far on RTX 30 and RTX 50.
+- **Logs.** In this port logging is off until you turn it on, and the copy
+  of the log you share has addresses and names masked, on the headset and
+  in this port's Meteor.
+- **Starting settings chosen with the battery in mind.**
+- **Voice commands and this port's own menu text in 20 languages**, as
+  first drafts that native speakers have not checked yet.
+
+See [the numbers](#the-numbers) for what was measured.
+
+There are two parts to install:
 
 - **Nightfall** on the headset (`NightfallFrame-….tar.gz`).
 - **Nightfall Meteor** on the PC (`Nightfall-Meteor-…-SteamFrame-Setup-x64.exe`).
-  Optional, but many of the features below need it.
-
-## What you get
-
-Much of this is Nightfall itself, which had already done the hard part:
-the streaming, the virtual screens, AI 3D and Meteor. The rest was added
-or adapted for the Frame.
-
-- **Native on SteamOS.** A SteamOS app of its own, so it doesn't go through
-  the Frame's Android support. Hardware video decoding, SteamVR's own
-  controller models, and a display rate that follows the stream: 72, 90,
-  120 or 144 Hz. (The original project now has an experimental native
-  Frame build of its own; this port is separate from it.)
-- **Any screen in 3D.** AI 3D turns a normal picture into stereo 3D. The
-  depth is made on your PC by Meteor (sharper, and lighter on the headset),
-  or on the headset itself with three models to choose from when there is
-  no Meteor.
-- **Stream Link.** With the Frame's wireless adapter in your PC, the picture,
-  sound, controls, microphone and depth travel over your Wi-Fi and the
-  adapter at the same time, and whichever copy arrives first is used. Choose
-  Multi-Link, Adapter first or Wi-Fi only, in the headset or in Meteor's
-  tray menu, without restarting anything.
-- **Talk to it.** Hold a button and speak, and what you say is typed on
-  your PC. It runs on the headset itself; nothing you say is sent anywhere
-  or saved. Say a menu button's name instead ("bezel off", "head lock",
-  "curve 40") and Nightfall does it: every button is a voice command, in 20
-  languages.
-- **A full-size keyboard.** Esc and all twelve F keys,
-  Tab, Caps, Ctrl, Alt and the Windows key, plus a row of one-press
-  shortcuts (Copy, Paste, Undo, Alt+Tab, Task Manager, Ctrl+Alt+Del and
-  more). Shift, Ctrl and Alt work like a phone's: one press for the next
-  key, two to lock. **Expand** it for a trackpad, arrow keys, a number pad,
-  media keys (volume, mute, play) and Windows shortcuts (snap, task view,
-  screenshot). Its **Mic key** starts voice typing: Nightfall's own on the
-  headset, or Windows' dictation on the PC, whichever you set.
-- **Looks after your eyes and your battery.** Eye-tracked foveation for
-  large curved screens, curved or flat screens, passthrough with an
-  adjustable fade, and starting settings chosen with the battery in mind
-  (about 76 minutes at 90 Hz with Meteor's depth, worked out from the power
-  it drew, not run down to empty).
-- **Passthrough that keeps up with a color camera.** With a color camera
-  add-on fitted (Arcturus Vision is the one it was built with), Nightfall
-  notices when that camera is showing the room and drops to 90 fps by
-  itself, which is what the headset can hold with it, then returns to your
-  own FPS when it isn't (in the dark, or with Passthrough off). It warns
-  you five seconds ahead so you can pause.
-- **Feels right in the hand.** Grab the screen and walk with it, Head Lock
-  (level or tilting with your head), and Recenter.
-- **On the ceiling when you lie down.** The screen opens wherever you are
-  looking, and Recenter brings it back there, straight up included: lie
-  back, look up, recenter, and it is above you the right way up.
-- **Controls that get out of the way.** The grab bar and its icons under
-  the screen only show while you point near them, and are gone half a
-  second after you point away, so nothing distracts from your game or film.
-- **Your controllers as a gamepad, without accidents.** In Game Controller
-  mode the two controllers act as one gamepad for the PC. The grab bar
-  shrinks to a single gamepad icon so nothing gets pressed by mistake while
-  you play, and leaving the mode takes a deliberate hold on that icon.
-- **A cursor that knows when you're holding the controller.** With Cursor
-  Follow on Capacitive Touch (Control tab), the PC's cursor follows your
-  pointer only while your fingers are on the controller. Take them off, or
-  set the controller down, and the cursor stays where it is and the pointer
-  ray switches itself off. Touch it again and both are back.
-- **Set up your way.** Map every controller button to what you want and
-  save the sets as profiles. Put the menu and keyboard where you like them
-  and make that the default.
-- **Several screens.** Show more than one of your PC's monitors, or add
-  virtual ones. This needs Meteor's built-in host.
-- **Pairing you can't miss.** Meteor opens a window on the PC that shows
-  the PIN and asks you to confirm it. One click.
-- **Logs that are safe to share.** Logging is off until you turn it on, the log you
-  share is cleaned of addresses and names, and so is Meteor's.
-- **In your language.** Nightfall's menus come in 20 languages. What this
-  port added to them, and its voice commands, are first drafts that native
-  speakers have not checked yet.
+  Optional, but many of the features above need it.
 
 ## What you need
 
@@ -204,7 +283,8 @@ then pair again.
 
 - The **grab bar** under the screen moves it; the corners resize it.
 - The tabs along the menu hold the everyday options; the **gear** opens
-  Advanced Settings.
+  Advanced Settings. The menu and keyboard can also be moved by grabbing
+  any spot on them that isn't a button.
 - **AI 3D** is on by default. Its tab chooses who makes the depth.
 - Lost the menu or the keyboard? **Hold its controller button** (Menu, and
   X for the keyboard, unless you changed them) for about three seconds and
@@ -214,14 +294,15 @@ then pair again.
 - **Zoom:** hold the right stick's click and push the stick up or down. It
   sends Ctrl+scroll, which zooms in most PC programs (that is the default
   button mapping; you can change it).
-- **Stream Link** is on the Stream tab.
+- **Stream Link** is on the Stream tab: Multi-Link, Adapter first or Wi-Fi
+  only.
 - **Head Lock** and **Passthrough** are on the Display tab.
 - Hold **Y** and speak (the button can be changed in the Buttons tab).
   What you say is **typed** on the PC, like dictation. If it is one of
   Nightfall's commands ("recenter", "bezel off"), the command runs instead.
   Advanced Settings > Voice & Microphone has the rest:
   - **Voice Commands** lists every command.
-  - **Require 'Nightfall'**: turn it on and a command only runs when you
+  - **Require 'Nightfall'**: turn it on and a voice command only runs when you
     say "Nightfall" first ("Nightfall bezel off"). Everything else is
     typed. Use it if commands go off by accident while you dictate.
   - **Commands** off: nothing is ever taken as a command; it is all typed.
@@ -297,7 +378,12 @@ are a gamepad for the PC instead.
 - **Everything back to how it came:** Advanced Settings > General >
   **Reset Settings** (your paired PCs, buttons and language are kept).
 
-## What frame rate to expect
+## The numbers
+
+What was measured, and how. Everything here comes from this port's own
+test sessions on one headset and one PC.
+
+### Frame rate
 
 Every Steam Frame is the same headset, so what the headset can hold should
 be the same for you. What your PC and your Wi-Fi can send is the part that
@@ -311,8 +397,9 @@ differs: these were measured with one PC (an RTX 5090).
 | Any, with a color camera add-on showing the room | either | 90 (Nightfall switches to it by itself) |
 
 - Nightfall starts at **90 fps**. It is the setting that held everywhere it
-  was tried, and it is easier on the battery than 144 (about 76 minutes
-  with Meteor's depth, worked out from the power it drew). **FPS** is on
+  was tried, and it is easier on the battery than 144 (with Meteor's
+  depth, about 76 minutes at 90 against about 60 at 144, worked out from
+  the power it drew). **FPS** is on
   the Stream tab.
 - For **144**, use a 1080p stream. Whether 1440p holds 144 with Meteor
   making the 3D has not been measured with this build.
@@ -394,8 +481,8 @@ the sound one itself, in its 0.9.1.
   Nightfall is still running underneath. Exit from Nightfall's own menu and
   start it again.
 - **AMD and Intel graphics cards** should work with Meteor's Vulkan depth
-  models; nobody has tried. NVIDIA's faster TensorRT model has run on RTX 30
-  and RTX 50 cards.
+  models; nobody has tried that on this port. NVIDIA's faster TensorRT
+  engine has run on RTX 30 and RTX 50 cards.
 - **Languages** other than English are first drafts, and voice commands in
   them have barely been heard by a speech model. Corrections are welcome.
 - **Two different Meteors.** This port comes with its own build of
@@ -410,7 +497,9 @@ the sound one itself, in its 0.9.1.
 - **Beside the original's Steam Frame build.** This port keeps its settings
   in a folder of its own, so both can be installed on one headset without
   one starting with the other's settings.
-- **Not in this build:** the in-headset browser, PCVR, the PyroWave codec.
+- **Not in this build:** the in-headset browser and the PyroWave codec.
+  **Not tried in it:** PC VR games through Meteor, hand tracking, HDR and
+  USB Link.
 
 ## Planned
 
@@ -418,7 +507,8 @@ the sound one itself, in its 0.9.1.
   itself with the game you start on the PC.
 - The two remaining Stream Link safety checks.
 - A menu and keyboard that keep their place the way SteamOS's own do when
-  the screen is pushed far away.
+  the screen is pushed far away. This port has an option for the menu and
+  keyboard to follow the screen, but it could use some work.
 - Translations and voice commands checked by people who speak the
   languages.
 
@@ -442,7 +532,8 @@ afterwards and attach the archive it makes.
 ## Uninstall
 
 On the headset: double-click `uninstall.sh` in `~/Games/NightfallFrame`.
-It asks first, and asks separately about the speech models and about your settings.
+It asks first, and asks separately about the speech models and about
+your settings.
 **Saying yes to settings also removes your button mappings and PC
 pairings.** `WHERE-THINGS-ARE.txt` in the same folder lists every place
 Nightfall keeps files.
