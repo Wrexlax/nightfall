@@ -3,9 +3,9 @@
 Your PC's screen as a big virtual screen in the Steam Frame, in 2D or 3D,
 running as a native SteamOS app.
 
-This is an **unofficial port** of [Nightfall](https://github.com/tB0nE/nightfall)
-by tB0nE, made by a Steam Frame owner who wanted to use Nightfall on that
-headset. Nightfall is tB0nE's work: the streaming, the virtual screen,
+This is an **unofficial port** of tB0nE's
+[Nightfall](https://github.com/tB0nE/nightfall), made by a Steam Frame
+owner who wanted to use it on that headset. Nightfall is tB0nE's work: the streaming, the virtual screen,
 AI 3D, Meteor and the menus all come from the original, and this port only
 adapts them to the Frame and adds a few things on top. The original
 project is where Nightfall is developed, and it has an experimental Steam
