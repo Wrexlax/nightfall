@@ -473,6 +473,12 @@ the sound one itself, in its 0.9.1.
 ## Known limits
 
 - **One tester.** One headset, one PC, one home network.
+- **Close the SteamOS desktop before using Nightfall.** This means the
+  desktop on the headset itself (the KDE desktop SteamOS can open, where
+  the installer runs), not your PC's desktop that Nightfall streams. While
+  it is open in the background, one press of a headset volume button in
+  Nightfall runs on to mute or to full. Closing that desktop's window in
+  Steam stops it at once, without closing Nightfall.
 - **Stream Link is made for a home network you trust.** This port's
   Meteor only sends its second copy of the stream to addresses on your own
   network, and only in answer to a request that carries that stream's own
