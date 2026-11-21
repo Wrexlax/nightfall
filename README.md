@@ -302,8 +302,22 @@ then pair again.
 - **Zoom:** hold the right stick's click and push the stick up or down. It
   sends Ctrl+scroll, which zooms in most PC programs (that is the default
   button mapping; you can change it).
-- **Stream Link** is on the Stream tab: Multi-Link, Adapter first or Wi-Fi
-  only.
+- **Stream Link** is on the Stream tab. With the Frame's wireless adapter
+  plugged into the PC, it chooses how the stream travels to the headset:
+  - **Multi-Link:** every packet is sent twice, over the adapter and over
+    your Wi-Fi, all the time. The headset uses whichever copy arrives
+    first, so a packet lost on one link is covered by the other with no
+    delay. The smoothest choice; your Wi-Fi carries the full stream the
+    whole time.
+  - **Adapter first:** the stream goes over the adapter alone and your
+    Wi-Fi stays free. If the adapter falters (nothing from it for a fifth
+    of a second, or more than 5% of the picture's packets missing), Wi-Fi
+    joins in until the adapter has been steady again for three seconds.
+    A brief stutter is possible at the moment it joins.
+  - **Wi-Fi only:** the adapter is not used.
+
+  Near the PC with a healthy adapter, Multi-Link and Adapter first look
+  the same. They differ when the adapter has a bad moment.
 - **Head Lock** and **Passthrough** are on the Display tab.
 - Hold **Y** and speak (the button can be changed in the Buttons tab).
   What you say is **typed** on the PC, like dictation. If it is one of
